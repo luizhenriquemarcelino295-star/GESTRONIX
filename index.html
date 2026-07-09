@@ -1,0 +1,441 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestronix - Sistema de Gestão de Frotas</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-section">
+                <div class="logo">G</div>
+                <div class="logo-text">
+                    <h1>Gestronix</h1>
+                    <p>Gestão que conecta. Resultados que movem.</p>
+                </div>
+            </div>
+            <div class="user-info">
+                <span id="userEmail">Usuário</span>
+                <span id="empresaNome" style="font-size: 12px; opacity: 0.9;"></span>
+                <button onclick="logout()">Sair</button>
+            </div>
+        </div>
+ 
+        <div class="main-content">
+            <div class="sidebar">
+                <div class="menu-item active" onclick="showPage('dashboard')">📊 Dashboard</div>
+                <div class="menu-item" onclick="showPage('motoristas')">👨‍✈️ Motoristas</div>
+                <div class="menu-item" onclick="showPage('funcionarios')">👔 Funcionários</div>
+                <div class="menu-item" onclick="showPage('veiculos')">🚗 Veículos</div>
+                <div class="menu-item" onclick="showPage('clientes')">👥 Clientes</div>
+                <div class="menu-item" onclick="showPage('manutencoes')">🔧 Manutenções</div>
+                <div class="menu-item" onclick="showPage('multas')">🚨 Multas</div>
+                <div class="menu-item" onclick="showPage('bancos')">🏦 Bancos</div>
+                <div class="menu-item" onclick="showPage('financeiro')">💰 Financeiro</div>
+                <div class="menu-item" onclick="showPage('rotas')">🗺️ Rotas</div>
+                <div class="menu-item" onclick="showPage('desempenho')">📈 Desempenho</div>
+                <div class="menu-item" onclick="showPage('aniversarios')">🎂 Aniversários</div>
+                <div class="menu-item" onclick="showPage('relatorios')">📋 Relatórios</div>
+            </div>
+ 
+            <div class="content">
+                <!-- DASHBOARD -->
+                <div id="dashboard" class="page active">
+                    <h2>📊 Dashboard</h2>
+                    <div class="dashboard-cards">
+                        <div class="card">
+                            <h3>Motoristas</h3>
+                            <div class="number" id="countMotoristas">0</div>
+                        </div>
+                        <div class="card">
+                            <h3>Funcionários</h3>
+                            <div class="number" id="countFuncionarios">0</div>
+                        </div>
+                        <div class="card">
+                            <h3>Veículos</h3>
+                            <div class="number" id="countVeiculos">0</div>
+                        </div>
+                        <div class="card">
+                            <h3>Clientes</h3>
+                            <div class="number" id="countClientes">0</div>
+                        </div>
+                        <div class="card">
+                            <h3>Total Gasto</h3>
+                            <div class="number" id="totalGasto">R$ 0</div>
+                        </div>
+                        <div class="card">
+                            <h3>Multas</h3>
+                            <div class="number" id="countMultas">0</div>
+                        </div>
+                    </div>
+ 
+                    <div class="chart-container">
+                        <canvas id="chartGastos"></canvas>
+                    </div>
+ 
+                    <div class="chart-container">
+                        <canvas id="chartCategorias"></canvas>
+                    </div>
+ 
+                    <div class="top-gastos">
+                        <h3>🔴 Top 10 Maiores Gastos</h3>
+                        <div id="topGastosList"></div>
+                    </div>
+                </div>
+ 
+                <!-- MOTORISTAS -->
+                <div id="motoristas" class="page">
+                    <h2>👨‍✈️ Motoristas</h2>
+                    <button onclick="openAddModal('motorista')">+ Adicionar Motorista</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>CPF</th>
+                                <th>Telefone</th>
+                                <th>Endereço</th>
+                                <th>Data Nascimento</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="motoristasTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- FUNCIONÁRIOS -->
+                <div id="funcionarios" class="page">
+                    <h2>👔 Funcionários</h2>
+                    <button onclick="openAddModal('funcionario')">+ Adicionar Funcionário</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>CPF</th>
+                                <th>Telefone</th>
+                                <th>Endereço</th>
+                                <th>Data Nascimento</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="funcionariosTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- VEÍCULOS -->
+                <div id="veiculos" class="page">
+                    <h2>🚗 Veículos</h2>
+                    <button onclick="openAddModal('veiculo')">+ Adicionar Veículo</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Placa</th>
+                                <th>Marca</th>
+                                <th>Modelo</th>
+                                <th>Ano</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="veiculosTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- CLIENTES -->
+                <div id="clientes" class="page">
+                    <h2>👥 Clientes</h2>
+                    <button onclick="openAddModal('cliente')">+ Adicionar Cliente</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>CPF/CNPJ</th>
+                                <th>Telefone</th>
+                                <th>Endereço</th>
+                                <th>Data Nascimento</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clientesTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- MANUTENÇÕES -->
+                <div id="manutencoes" class="page">
+                    <h2>🔧 Manutenções</h2>
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('abastecimentos')">⛽ Abastecimentos</button>
+                        <button class="tab" onclick="switchTab('pneus')">🛞 Pneus</button>
+                        <button class="tab" onclick="switchTab('oleos')">🛢️ Óleos</button>
+                        <button class="tab" onclick="switchTab('preventiva')">🔧 Preventiva</button>
+                    </div>
+ 
+                    <!-- ABASTECIMENTOS -->
+                    <div id="abastecimentos" class="tab-content active">
+                        <h3>⛽ Abastecimentos</h3>
+                        <button onclick="openAddModal('abastecimento')">+ Adicionar Abastecimento</button>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Veículo</th>
+                                    <th>Data</th>
+                                    <th>KM</th>
+                                    <th>Litros</th>
+                                    <th>Valor/L</th>
+                                    <th>Valor Total</th>
+                                    <th>KM/L</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="abastecimentosTable"></tbody>
+                        </table>
+                    </div>
+ 
+                    <!-- PNEUS -->
+                    <div id="pneus" class="tab-content">
+                        <h3>🛞 Pneus</h3>
+                        <button onclick="openAddModal('pneu')">+ Adicionar Pneu</button>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Veículo</th>
+                                    <th>Data</th>
+                                    <th>Descrição</th>
+                                    <th>KM Atual</th>
+                                    <th>KM Próxima Troca</th>
+                                    <th>KM Faltando</th>
+                                    <th>Valor</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="neusTable"></tbody>
+                        </table>
+                    </div>
+ 
+                    <!-- ÓLEOS -->
+                    <div id="oleos" class="tab-content">
+                        <h3>🛢️ Óleos</h3>
+                        <button onclick="openAddModal('oleo')">+ Adicionar Óleo</button>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Veículo</th>
+                                    <th>Data</th>
+                                    <th>Tipo</th>
+                                    <th>KM Atual</th>
+                                    <th>KM Próxima Troca</th>
+                                    <th>KM Faltando</th>
+                                    <th>Valor</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="oleosTable"></tbody>
+                        </table>
+                    </div>
+ 
+                    <!-- MANUTENÇÃO PREVENTIVA -->
+                    <div id="preventiva" class="tab-content">
+                        <h3>🔧 Manutenção Preventiva</h3>
+                        <button onclick="openAddModal('preventiva')">+ Adicionar Manutenção Preventiva</button>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Veículo</th>
+                                    <th>Data</th>
+                                    <th>Descrição</th>
+                                    <th>KM Atual</th>
+                                    <th>KM Próxima Troca</th>
+                                    <th>KM Faltando</th>
+                                    <th>Valor</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="preventivaTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+ 
+                <!-- MULTAS -->
+                <div id="multas" class="page">
+                    <h2>🚨 Multas</h2>
+                    <button onclick="openAddModal('multa')">+ Adicionar Multa</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Veículo</th>
+                                <th>Data</th>
+                                <th>Descrição</th>
+                                <th>Valor</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="multasTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- BANCOS -->
+                <div id="bancos" class="page">
+                    <h2>🏦 Bancos</h2>
+                    <button onclick="openAddModal('banco')">+ Adicionar Banco</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>Agência</th>
+                                <th>Conta</th>
+                                <th>Saldo</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bancosTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- FINANCEIRO -->
+                <div id="financeiro" class="page">
+                    <h2>💰 Financeiro</h2>
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label>Data Inicial</label>
+                            <input type="date" id="filtroDataInicio" onchange="filtrarFinanceiro()">
+                        </div>
+                        <div class="filter-group">
+                            <label>Data Final</label>
+                            <input type="date" id="filtroDataFim" onchange="filtrarFinanceiro()">
+                        </div>
+                        <div class="filter-group">
+                            <label>Tipo</label>
+                            <select id="filtroTipo" onchange="filtrarFinanceiro()">
+                                <option value="">Todos</option>
+                                <option value="entrada">Entrada</option>
+                                <option value="saida">Saída</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Motivo</label>
+                            <select id="filtroMotivo" onchange="filtrarFinanceiro()">
+                                <option value="">Todos</option>
+                                <option value="Abastecimento">Abastecimento</option>
+                                <option value="Manutenção">Manutenção</option>
+                                <option value="Multa">Multa</option>
+                                <option value="Salário">Salário</option>
+                                <option value="Outro">Outro</option>
+                            </select>
+                        </div>
+                        <button onclick="limparFiltros()">Limpar Filtros</button>
+                    </div>
+                    <button onclick="openAddModal('financeiro')">+ Adicionar Lançamento</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Banco</th>
+                                <th>Tipo</th>
+                                <th>Motivo</th>
+                                <th>Descrição</th>
+                                <th>Valor</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="financeiroTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- ROTAS -->
+                <div id="rotas" class="page">
+                    <h2>🗺️ Rotas</h2>
+                    <button onclick="openAddModal('rota')">+ Adicionar Rota</button>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Veículo</th>
+                                <th>Motorista</th>
+                                <th>Local Saída</th>
+                                <th>Destino</th>
+                                <th>Data Início</th>
+                                <th>Data Fim</th>
+                                <th>KM Percorrido</th>
+                                <th>Tempo Total</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rotasTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- DESEMPENHO -->
+                <div id="desempenho" class="page">
+                    <h2>📈 Desempenho</h2>
+                    <div id="desempenhoContent"></div>
+                </div>
+ 
+                <!-- ANIVERSÁRIOS -->
+                <div id="aniversarios" class="page">
+                    <h2>🎂 Aniversários</h2>
+                    <div id="aniversariosContent"></div>
+                </div>
+ 
+                <!-- RELATÓRIOS -->
+                <div id="relatorios" class="page">
+                    <h2>📋 Relatórios</h2>
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label>Período</label>
+                            <select id="filtroRelatorio" onchange="gerarRelatorio()">
+                                <option value="mes">Mês Atual</option>
+                                <option value="trimestre">Trimestre Atual</option>
+                                <option value="semestre">Semestre Atual</option>
+                                <option value="ano">Ano Atual</option>
+                            </select>
+                        </div>
+                    </div>
+ 
+                    <div class="top-gastos" id="resumoFinanceiro"></div>
+ 
+                    <div class="chart-container">
+                        <canvas id="chartRelatorio"></canvas>
+                    </div>
+ 
+                    <h3 style="margin-top: 30px;">Gastos por Rota</h3>
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label>Rota</label>
+                            <select id="filtroRotaRelatorio" onchange="gerarRelatorioRotas()"></select>
+                        </div>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Veículo</th>
+                                <th>Motorista</th>
+                                <th>Local Saída</th>
+                                <th>Destino</th>
+                                <th>Data</th>
+                                <th>KM Percorrido</th>
+                                <th>Gasto Total</th>
+                                <th>Custo/KM</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rotasGastoTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+ 
+    <!-- MODAL -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Adicionar</h3>
+                <button class="close-btn" onclick="closeModal()">×</button>
+            </div>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+ 
+    <script src="script.js"></script>
+</body>
+</html>
