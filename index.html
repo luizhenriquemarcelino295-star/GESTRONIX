@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -6,7 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestronix - Sistema de Gestão de Frotas</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="style.css">
+    <style>
+        .btn-excel { background: #1d6f42; }
+        .btn-excel:hover { background: #155a34; }
+        .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+        .estoque-baixo { background: #fdecea !important; }
+        .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .badge-ativo { background: #d4edda; color: #155724; }
+        .badge-demitido { background: #f8d7da; color: #721c24; }
+        .badge-experiencia { background: #fff3cd; color: #856404; }
+        .badge-pago { background: #d4edda; color: #155724; }
+        .badge-pendente { background: #f8d7da; color: #721c24; }
+        .sim-result { background: #e3f2fd; padding: 20px; border-radius: 8px; margin-top: 15px; }
+        .sim-result h3 { color: #0066cc; margin-bottom: 10px; }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -34,6 +49,9 @@
                 <div class="menu-item" onclick="showPage('clientes')">👥 Clientes</div>
                 <div class="menu-item" onclick="showPage('manutencoes')">🔧 Manutenções</div>
                 <div class="menu-item" onclick="showPage('multas')">🚨 Multas</div>
+                <div class="menu-item" onclick="showPage('estoque')">📦 Estoque</div>
+                <div class="menu-item" onclick="showPage('turismo')">🧳 Turismo</div>
+                <div class="menu-item" onclick="showPage('agenda')">📅 Agenda</div>
                 <div class="menu-item" onclick="showPage('bancos')">🏦 Bancos</div>
                 <div class="menu-item" onclick="showPage('financeiro')">💰 Financeiro</div>
                 <div class="menu-item" onclick="showPage('rotas')">🗺️ Rotas</div>
@@ -47,59 +65,31 @@
                 <div id="dashboard" class="page active">
                     <h2>📊 Dashboard</h2>
                     <div class="dashboard-cards">
-                        <div class="card">
-                            <h3>Motoristas</h3>
-                            <div class="number" id="countMotoristas">0</div>
-                        </div>
-                        <div class="card">
-                            <h3>Funcionários</h3>
-                            <div class="number" id="countFuncionarios">0</div>
-                        </div>
-                        <div class="card">
-                            <h3>Veículos</h3>
-                            <div class="number" id="countVeiculos">0</div>
-                        </div>
-                        <div class="card">
-                            <h3>Clientes</h3>
-                            <div class="number" id="countClientes">0</div>
-                        </div>
-                        <div class="card">
-                            <h3>Total Gasto</h3>
-                            <div class="number" id="totalGasto">R$ 0</div>
-                        </div>
-                        <div class="card">
-                            <h3>Multas</h3>
-                            <div class="number" id="countMultas">0</div>
-                        </div>
+                        <div class="card"><h3>Motoristas</h3><div class="number" id="countMotoristas">0</div></div>
+                        <div class="card"><h3>Funcionários</h3><div class="number" id="countFuncionarios">0</div></div>
+                        <div class="card"><h3>Veículos</h3><div class="number" id="countVeiculos">0</div></div>
+                        <div class="card"><h3>Clientes</h3><div class="number" id="countClientes">0</div></div>
+                        <div class="card"><h3>Total Gasto</h3><div class="number" id="totalGasto">R$ 0</div></div>
+                        <div class="card"><h3>Multas</h3><div class="number" id="countMultas">0</div></div>
+                        <div class="card"><h3>Produtos em Baixa</h3><div class="number" id="countEstoqueBaixo">0</div></div>
                     </div>
- 
-                    <div class="chart-container">
-                        <canvas id="chartGastos"></canvas>
-                    </div>
- 
-                    <div class="chart-container">
-                        <canvas id="chartCategorias"></canvas>
-                    </div>
- 
-                    <div class="top-gastos">
-                        <h3>🔴 Top 10 Maiores Gastos</h3>
-                        <div id="topGastosList"></div>
-                    </div>
+                    <div class="chart-container"><canvas id="chartGastos"></canvas></div>
+                    <div class="chart-container"><canvas id="chartCategorias"></canvas></div>
+                    <div class="top-gastos"><h3>🔴 Top 10 Maiores Gastos</h3><div id="topGastosList"></div></div>
                 </div>
  
                 <!-- MOTORISTAS -->
                 <div id="motoristas" class="page">
                     <h2>👨‍✈️ Motoristas</h2>
-                    <button onclick="openAddModal('motorista')">+ Adicionar Motorista</button>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('motorista')">+ Adicionar Motorista</button>
+                        <button class="btn-excel" onclick="exportarExcel('motoristas')">📥 Exportar Excel</button>
+                    </div>
                     <table>
                         <thead>
                             <tr>
-                                <th>Nome</th>
-                                <th>CPF</th>
-                                <th>Telefone</th>
-                                <th>Endereço</th>
-                                <th>Data Nascimento</th>
-                                <th>Ações</th>
+                                <th>Nome</th><th>CPF</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th>
+                                <th>Val. CNH</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th>
                             </tr>
                         </thead>
                         <tbody id="motoristasTable"></tbody>
@@ -109,36 +99,44 @@
                 <!-- FUNCIONÁRIOS -->
                 <div id="funcionarios" class="page">
                     <h2>👔 Funcionários</h2>
-                    <button onclick="openAddModal('funcionario')">+ Adicionar Funcionário</button>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Nome</th>
-                                <th>CPF</th>
-                                <th>Telefone</th>
-                                <th>Endereço</th>
-                                <th>Data Nascimento</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody id="funcionariosTable"></tbody>
-                    </table>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('funcionario')">+ Adicionar Funcionário</button>
+                        <button class="btn-excel" onclick="exportarExcel('funcionarios')">📥 Exportar Excel</button>
+                    </div>
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('funcAtivos')">✅ Ativos</button>
+                        <button class="tab" onclick="switchTab('funcDemitidos')">❌ Demitidos</button>
+                        <button class="tab" onclick="switchTab('funcExperiencia')">⏳ Contrato de Experiência</button>
+                    </div>
+                    <div id="funcAtivos" class="tab-content active">
+                        <table>
+                            <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Admissão</th><th>Ações</th></tr></thead>
+                            <tbody id="funcAtivosTable"></tbody>
+                        </table>
+                    </div>
+                    <div id="funcDemitidos" class="tab-content">
+                        <table>
+                            <thead><tr><th>Nome</th><th>CPF</th><th>Admissão</th><th>Demissão</th><th>Ações</th></tr></thead>
+                            <tbody id="funcDemitidosTable"></tbody>
+                        </table>
+                    </div>
+                    <div id="funcExperiencia" class="tab-content">
+                        <table>
+                            <thead><tr><th>Nome</th><th>CPF</th><th>Início Experiência</th><th>Fim Experiência</th><th>Ações</th></tr></thead>
+                            <tbody id="funcExperienciaTable"></tbody>
+                        </table>
+                    </div>
                 </div>
  
                 <!-- VEÍCULOS -->
                 <div id="veiculos" class="page">
                     <h2>🚗 Veículos</h2>
-                    <button onclick="openAddModal('veiculo')">+ Adicionar Veículo</button>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('veiculo')">+ Adicionar Veículo</button>
+                        <button class="btn-excel" onclick="exportarExcel('veiculos')">📥 Exportar Excel</button>
+                    </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Placa</th>
-                                <th>Marca</th>
-                                <th>Modelo</th>
-                                <th>Ano</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Ações</th></tr></thead>
                         <tbody id="veiculosTable"></tbody>
                     </table>
                 </div>
@@ -146,18 +144,12 @@
                 <!-- CLIENTES -->
                 <div id="clientes" class="page">
                     <h2>👥 Clientes</h2>
-                    <button onclick="openAddModal('cliente')">+ Adicionar Cliente</button>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('cliente')">+ Adicionar Cliente</button>
+                        <button class="btn-excel" onclick="exportarExcel('clientes')">📥 Exportar Excel</button>
+                    </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Nome</th>
-                                <th>CPF/CNPJ</th>
-                                <th>Telefone</th>
-                                <th>Endereço</th>
-                                <th>Data Nascimento</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Nome</th><th>CPF/CNPJ</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th><th>Ações</th></tr></thead>
                         <tbody id="clientesTable"></tbody>
                     </table>
                 </div>
@@ -172,86 +164,46 @@
                         <button class="tab" onclick="switchTab('preventiva')">🔧 Preventiva</button>
                     </div>
  
-                    <!-- ABASTECIMENTOS -->
                     <div id="abastecimentos" class="tab-content active">
-                        <h3>⛽ Abastecimentos</h3>
-                        <button onclick="openAddModal('abastecimento')">+ Adicionar Abastecimento</button>
+                        <div class="btn-row">
+                            <button onclick="openAddModal('abastecimento')">+ Adicionar Abastecimento</button>
+                            <button class="btn-excel" onclick="exportarExcel('abastecimentos')">📥 Exportar Excel</button>
+                        </div>
                         <table>
-                            <thead>
-                                <tr>
-                                    <th>Veículo</th>
-                                    <th>Data</th>
-                                    <th>KM</th>
-                                    <th>Litros</th>
-                                    <th>Valor/L</th>
-                                    <th>Valor Total</th>
-                                    <th>KM/L</th>
-                                    <th>Ações</th>
-                                </tr>
-                            </thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>KM</th><th>Litros</th><th>Valor/L</th><th>Valor Total</th><th>KM/L</th><th>Ações</th></tr></thead>
                             <tbody id="abastecimentosTable"></tbody>
                         </table>
                     </div>
  
-                    <!-- PNEUS -->
                     <div id="pneus" class="tab-content">
-                        <h3>🛞 Pneus</h3>
-                        <button onclick="openAddModal('pneu')">+ Adicionar Pneu</button>
+                        <div class="btn-row">
+                            <button onclick="openAddModal('pneu')">+ Adicionar Pneu</button>
+                            <button class="btn-excel" onclick="exportarExcel('pneus')">📥 Exportar Excel</button>
+                        </div>
                         <table>
-                            <thead>
-                                <tr>
-                                    <th>Veículo</th>
-                                    <th>Data</th>
-                                    <th>Descrição</th>
-                                    <th>KM Atual</th>
-                                    <th>KM Próxima Troca</th>
-                                    <th>KM Faltando</th>
-                                    <th>Valor</th>
-                                    <th>Ações</th>
-                                </tr>
-                            </thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>KM Atual</th><th>KM Próxima</th><th>KM Faltando</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="neusTable"></tbody>
                         </table>
                     </div>
  
-                    <!-- ÓLEOS -->
                     <div id="oleos" class="tab-content">
-                        <h3>🛢️ Óleos</h3>
-                        <button onclick="openAddModal('oleo')">+ Adicionar Óleo</button>
+                        <div class="btn-row">
+                            <button onclick="openAddModal('oleo')">+ Adicionar Óleo</button>
+                            <button class="btn-excel" onclick="exportarExcel('oleos')">📥 Exportar Excel</button>
+                        </div>
                         <table>
-                            <thead>
-                                <tr>
-                                    <th>Veículo</th>
-                                    <th>Data</th>
-                                    <th>Tipo</th>
-                                    <th>KM Atual</th>
-                                    <th>KM Próxima Troca</th>
-                                    <th>KM Faltando</th>
-                                    <th>Valor</th>
-                                    <th>Ações</th>
-                                </tr>
-                            </thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>KM Atual</th><th>KM Próxima</th><th>KM Faltando</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="oleosTable"></tbody>
                         </table>
                     </div>
  
-                    <!-- MANUTENÇÃO PREVENTIVA -->
                     <div id="preventiva" class="tab-content">
-                        <h3>🔧 Manutenção Preventiva</h3>
-                        <button onclick="openAddModal('preventiva')">+ Adicionar Manutenção Preventiva</button>
+                        <div class="btn-row">
+                            <button onclick="openAddModal('preventiva')">+ Adicionar Manutenção Preventiva</button>
+                            <button class="btn-excel" onclick="exportarExcel('preventivas')">📥 Exportar Excel</button>
+                        </div>
                         <table>
-                            <thead>
-                                <tr>
-                                    <th>Veículo</th>
-                                    <th>Data</th>
-                                    <th>Descrição</th>
-                                    <th>KM Atual</th>
-                                    <th>KM Próxima Troca</th>
-                                    <th>KM Faltando</th>
-                                    <th>Valor</th>
-                                    <th>Ações</th>
-                                </tr>
-                            </thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>KM Atual</th><th>KM Próxima</th><th>KM Faltando</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="preventivaTable"></tbody>
                         </table>
                     </div>
@@ -260,35 +212,98 @@
                 <!-- MULTAS -->
                 <div id="multas" class="page">
                     <h2>🚨 Multas</h2>
-                    <button onclick="openAddModal('multa')">+ Adicionar Multa</button>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('multa')">+ Adicionar Multa</button>
+                        <button class="btn-excel" onclick="exportarExcel('multas')">📥 Exportar Excel</button>
+                    </div>
+                    <table>
+                        <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead>
+                        <tbody id="multasTable"></tbody>
+                    </table>
+                </div>
+ 
+                <!-- ESTOQUE -->
+                <div id="estoque" class="page">
+                    <h2>📦 Estoque</h2>
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('estoqueProdutos')">📦 Produtos</button>
+                        <button class="tab" onclick="switchTab('estoqueMovimentacoes')">🔄 Movimentações</button>
+                    </div>
+                    <div id="estoqueProdutos" class="tab-content active">
+                        <div class="btn-row">
+                            <button onclick="openAddModal('produto')">+ Adicionar Produto</button>
+                            <button class="btn-excel" onclick="exportarExcel('produtos')">📥 Exportar Excel</button>
+                        </div>
+                        <table>
+                            <thead><tr><th>Nome</th><th>Categoria</th><th>Qtd. Atual</th><th>Qtd. Mínima</th><th>Unidade</th><th>Valor Unit.</th><th>Ações</th></tr></thead>
+                            <tbody id="produtosTable"></tbody>
+                        </table>
+                    </div>
+                    <div id="estoqueMovimentacoes" class="tab-content">
+                        <div class="btn-row">
+                            <button onclick="openAddModal('movimentacao')">+ Registrar Movimentação</button>
+                            <button class="btn-excel" onclick="exportarExcel('estoque_movimentacoes')">📥 Exportar Excel</button>
+                        </div>
+                        <table>
+                            <thead><tr><th>Produto</th><th>Tipo</th><th>Quantidade</th><th>Motivo</th><th>Data</th><th>Ações</th></tr></thead>
+                            <tbody id="movimentacoesTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+ 
+                <!-- TURISMO -->
+                <div id="turismo" class="page">
+                    <h2>🧳 Turismo</h2>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('viagem')">+ Adicionar Viagem</button>
+                        <button class="btn-excel" onclick="exportarExcel('turismo_viagens')">📥 Exportar Excel</button>
+                        <button onclick="openAddModal('simularViagem')">🧮 Simular Viagem</button>
+                    </div>
+                    <div class="filters">
+                        <div class="filter-group">
+                            <label>Data Inicial</label>
+                            <input type="date" id="filtroTurismoDataInicio" onchange="filtrarTurismo()">
+                        </div>
+                        <div class="filter-group">
+                            <label>Data Final</label>
+                            <input type="date" id="filtroTurismoDataFim" onchange="filtrarTurismo()">
+                        </div>
+                        <div class="filter-group">
+                            <label>Cliente</label>
+                            <select id="filtroTurismoCliente" onchange="filtrarTurismo()"><option value="">Todos</option></select>
+                        </div>
+                        <button onclick="limparFiltrosTurismo()">Limpar Filtros</button>
+                    </div>
                     <table>
                         <thead>
                             <tr>
-                                <th>Veículo</th>
-                                <th>Data</th>
-                                <th>Descrição</th>
-                                <th>Valor</th>
-                                <th>Ações</th>
+                                <th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th>
+                                <th>Valor Viagem</th><th>Valor Motorista</th><th>Acerto</th><th>Ações</th>
                             </tr>
                         </thead>
-                        <tbody id="multasTable"></tbody>
+                        <tbody id="turismoTable"></tbody>
                     </table>
+                </div>
+ 
+                <!-- AGENDA -->
+                <div id="agenda" class="page">
+                    <h2>📅 Agenda</h2>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('agenda')">+ Adicionar Compromisso</button>
+                        <button class="btn-excel" onclick="exportarExcel('agenda')">📥 Exportar Excel</button>
+                    </div>
+                    <div id="agendaContent"></div>
                 </div>
  
                 <!-- BANCOS -->
                 <div id="bancos" class="page">
                     <h2>🏦 Bancos</h2>
-                    <button onclick="openAddModal('banco')">+ Adicionar Banco</button>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('banco')">+ Adicionar Banco</button>
+                        <button class="btn-excel" onclick="exportarExcel('bancos')">📥 Exportar Excel</button>
+                    </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Nome</th>
-                                <th>Agência</th>
-                                <th>Conta</th>
-                                <th>Saldo</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Nome</th><th>Agência</th><th>Conta</th><th>Saldo</th><th>Ações</th></tr></thead>
                         <tbody id="bancosTable"></tbody>
                     </table>
                 </div>
@@ -297,48 +312,30 @@
                 <div id="financeiro" class="page">
                     <h2>💰 Financeiro</h2>
                     <div class="filters">
-                        <div class="filter-group">
-                            <label>Data Inicial</label>
-                            <input type="date" id="filtroDataInicio" onchange="filtrarFinanceiro()">
-                        </div>
-                        <div class="filter-group">
-                            <label>Data Final</label>
-                            <input type="date" id="filtroDataFim" onchange="filtrarFinanceiro()">
-                        </div>
+                        <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroDataInicio" onchange="filtrarFinanceiro()"></div>
+                        <div class="filter-group"><label>Data Final</label><input type="date" id="filtroDataFim" onchange="filtrarFinanceiro()"></div>
                         <div class="filter-group">
                             <label>Tipo</label>
                             <select id="filtroTipo" onchange="filtrarFinanceiro()">
-                                <option value="">Todos</option>
-                                <option value="entrada">Entrada</option>
-                                <option value="saida">Saída</option>
+                                <option value="">Todos</option><option value="entrada">Entrada</option><option value="saida">Saída</option>
                             </select>
                         </div>
                         <div class="filter-group">
                             <label>Motivo</label>
                             <select id="filtroMotivo" onchange="filtrarFinanceiro()">
-                                <option value="">Todos</option>
-                                <option value="Abastecimento">Abastecimento</option>
-                                <option value="Manutenção">Manutenção</option>
-                                <option value="Multa">Multa</option>
-                                <option value="Salário">Salário</option>
-                                <option value="Outro">Outro</option>
+                                <option value="">Todos</option><option value="Abastecimento">Abastecimento</option>
+                                <option value="Manutenção">Manutenção</option><option value="Multa">Multa</option>
+                                <option value="Salário">Salário</option><option value="Outro">Outro</option>
                             </select>
                         </div>
                         <button onclick="limparFiltros()">Limpar Filtros</button>
                     </div>
-                    <button onclick="openAddModal('financeiro')">+ Adicionar Lançamento</button>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('financeiro')">+ Adicionar Lançamento</button>
+                        <button class="btn-excel" onclick="exportarExcel('financeiro')">📥 Exportar Excel</button>
+                    </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Data</th>
-                                <th>Banco</th>
-                                <th>Tipo</th>
-                                <th>Motivo</th>
-                                <th>Descrição</th>
-                                <th>Valor</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Data</th><th>Banco</th><th>Tipo</th><th>Motivo</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead>
                         <tbody id="financeiroTable"></tbody>
                     </table>
                 </div>
@@ -346,20 +343,13 @@
                 <!-- ROTAS -->
                 <div id="rotas" class="page">
                     <h2>🗺️ Rotas</h2>
-                    <button onclick="openAddModal('rota')">+ Adicionar Rota</button>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('rota')">+ Adicionar Rota</button>
+                        <button class="btn-excel" onclick="exportarExcel('rotas')">📥 Exportar Excel</button>
+                    </div>
                     <table>
                         <thead>
-                            <tr>
-                                <th>Veículo</th>
-                                <th>Motorista</th>
-                                <th>Local Saída</th>
-                                <th>Destino</th>
-                                <th>Data Início</th>
-                                <th>Data Fim</th>
-                                <th>KM Percorrido</th>
-                                <th>Tempo Total</th>
-                                <th>Ações</th>
-                            </tr>
+                            <tr><th>Veículo</th><th>Motorista</th><th>Saída</th><th>Destino</th><th>Início</th><th>Fim</th><th>KM</th><th>Tempo</th><th>Ações</th></tr>
                         </thead>
                         <tbody id="rotasTable"></tbody>
                     </table>
@@ -384,40 +374,19 @@
                         <div class="filter-group">
                             <label>Período</label>
                             <select id="filtroRelatorio" onchange="gerarRelatorio()">
-                                <option value="mes">Mês Atual</option>
-                                <option value="trimestre">Trimestre Atual</option>
-                                <option value="semestre">Semestre Atual</option>
-                                <option value="ano">Ano Atual</option>
+                                <option value="mes">Mês Atual</option><option value="trimestre">Trimestre Atual</option>
+                                <option value="semestre">Semestre Atual</option><option value="ano">Ano Atual</option>
                             </select>
                         </div>
                     </div>
- 
                     <div class="top-gastos" id="resumoFinanceiro"></div>
- 
-                    <div class="chart-container">
-                        <canvas id="chartRelatorio"></canvas>
-                    </div>
- 
+                    <div class="chart-container"><canvas id="chartRelatorio"></canvas></div>
                     <h3 style="margin-top: 30px;">Gastos por Rota</h3>
                     <div class="filters">
-                        <div class="filter-group">
-                            <label>Rota</label>
-                            <select id="filtroRotaRelatorio" onchange="gerarRelatorioRotas()"></select>
-                        </div>
+                        <div class="filter-group"><label>Rota</label><select id="filtroRotaRelatorio" onchange="gerarRelatorioRotas()"></select></div>
                     </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Veículo</th>
-                                <th>Motorista</th>
-                                <th>Local Saída</th>
-                                <th>Destino</th>
-                                <th>Data</th>
-                                <th>KM Percorrido</th>
-                                <th>Gasto Total</th>
-                                <th>Custo/KM</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Veículo</th><th>Motorista</th><th>Saída</th><th>Destino</th><th>Data</th><th>KM</th><th>Gasto</th><th>Custo/KM</th></tr></thead>
                         <tbody id="rotasGastoTable"></tbody>
                     </table>
                 </div>
@@ -439,3 +408,4 @@
     <script src="script.js"></script>
 </body>
 </html>
+ 
