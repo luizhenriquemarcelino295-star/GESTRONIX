@@ -21,6 +21,11 @@
         .badge-pendente { background: #f8d7da; color: #721c24; }
         .sim-result { background: #e3f2fd; padding: 20px; border-radius: 8px; margin-top: 15px; }
         .sim-result h3 { color: #0066cc; margin-bottom: 10px; }
+        .clickable-card { cursor: pointer; transition: box-shadow 0.2s; }
+        .clickable-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .sub-list { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ddd; display: none; }
+        .sub-list.open { display: block; }
+        .sub-list table { margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -86,12 +91,7 @@
                         <button class="btn-excel" onclick="exportarExcel('motoristas')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Nome</th><th>CPF</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th>
-                                <th>Val. CNH</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th><th>Val. CNH</th><th>Ações</th></tr></thead>
                         <tbody id="motoristasTable"></tbody>
                     </table>
                 </div>
@@ -109,22 +109,13 @@
                         <button class="tab" onclick="switchTab('funcExperiencia')">⏳ Contrato de Experiência</button>
                     </div>
                     <div id="funcAtivos" class="tab-content active">
-                        <table>
-                            <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Admissão</th><th>Ações</th></tr></thead>
-                            <tbody id="funcAtivosTable"></tbody>
-                        </table>
+                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Admissão</th><th>Ações</th></tr></thead><tbody id="funcAtivosTable"></tbody></table>
                     </div>
                     <div id="funcDemitidos" class="tab-content">
-                        <table>
-                            <thead><tr><th>Nome</th><th>CPF</th><th>Admissão</th><th>Demissão</th><th>Ações</th></tr></thead>
-                            <tbody id="funcDemitidosTable"></tbody>
-                        </table>
+                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Admissão</th><th>Demissão</th><th>Ações</th></tr></thead><tbody id="funcDemitidosTable"></tbody></table>
                     </div>
                     <div id="funcExperiencia" class="tab-content">
-                        <table>
-                            <thead><tr><th>Nome</th><th>CPF</th><th>Início Experiência</th><th>Fim Experiência</th><th>Ações</th></tr></thead>
-                            <tbody id="funcExperienciaTable"></tbody>
-                        </table>
+                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Início Experiência</th><th>Fim Experiência</th><th>Ações</th></tr></thead><tbody id="funcExperienciaTable"></tbody></table>
                     </div>
                 </div>
  
@@ -136,7 +127,7 @@
                         <button class="btn-excel" onclick="exportarExcel('veiculos')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>KM Atual</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
                         <tbody id="veiculosTable"></tbody>
                     </table>
                 </div>
@@ -163,7 +154,6 @@
                         <button class="tab" onclick="switchTab('oleos')">🛢️ Óleos</button>
                         <button class="tab" onclick="switchTab('preventiva')">🔧 Preventiva</button>
                     </div>
- 
                     <div id="abastecimentos" class="tab-content active">
                         <div class="btn-row">
                             <button onclick="openAddModal('abastecimento')">+ Adicionar Abastecimento</button>
@@ -174,7 +164,6 @@
                             <tbody id="abastecimentosTable"></tbody>
                         </table>
                     </div>
- 
                     <div id="pneus" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('pneu')">+ Adicionar Pneu</button>
@@ -185,7 +174,6 @@
                             <tbody id="neusTable"></tbody>
                         </table>
                     </div>
- 
                     <div id="oleos" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('oleo')">+ Adicionar Óleo</button>
@@ -196,7 +184,6 @@
                             <tbody id="oleosTable"></tbody>
                         </table>
                     </div>
- 
                     <div id="preventiva" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('preventiva')">+ Adicionar Manutenção Preventiva</button>
@@ -260,27 +247,13 @@
                         <button onclick="openAddModal('simularViagem')">🧮 Simular Viagem</button>
                     </div>
                     <div class="filters">
-                        <div class="filter-group">
-                            <label>Data Inicial</label>
-                            <input type="date" id="filtroTurismoDataInicio" onchange="filtrarTurismo()">
-                        </div>
-                        <div class="filter-group">
-                            <label>Data Final</label>
-                            <input type="date" id="filtroTurismoDataFim" onchange="filtrarTurismo()">
-                        </div>
-                        <div class="filter-group">
-                            <label>Cliente</label>
-                            <select id="filtroTurismoCliente" onchange="filtrarTurismo()"><option value="">Todos</option></select>
-                        </div>
+                        <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroTurismoDataInicio" onchange="filtrarTurismo()"></div>
+                        <div class="filter-group"><label>Data Final</label><input type="date" id="filtroTurismoDataFim" onchange="filtrarTurismo()"></div>
+                        <div class="filter-group"><label>Cliente</label><select id="filtroTurismoCliente" onchange="filtrarTurismo()"><option value="">Todos</option></select></div>
                         <button onclick="limparFiltrosTurismo()">Limpar Filtros</button>
                     </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th>
-                                <th>Valor Viagem</th><th>Valor Motorista</th><th>Acerto</th><th>Ações</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>Valor Viagem</th><th>Valor Motorista</th><th>Acerto</th><th>Ações</th></tr></thead>
                         <tbody id="turismoTable"></tbody>
                     </table>
                 </div>
@@ -314,20 +287,8 @@
                     <div class="filters">
                         <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroDataInicio" onchange="filtrarFinanceiro()"></div>
                         <div class="filter-group"><label>Data Final</label><input type="date" id="filtroDataFim" onchange="filtrarFinanceiro()"></div>
-                        <div class="filter-group">
-                            <label>Tipo</label>
-                            <select id="filtroTipo" onchange="filtrarFinanceiro()">
-                                <option value="">Todos</option><option value="entrada">Entrada</option><option value="saida">Saída</option>
-                            </select>
-                        </div>
-                        <div class="filter-group">
-                            <label>Motivo</label>
-                            <select id="filtroMotivo" onchange="filtrarFinanceiro()">
-                                <option value="">Todos</option><option value="Abastecimento">Abastecimento</option>
-                                <option value="Manutenção">Manutenção</option><option value="Multa">Multa</option>
-                                <option value="Salário">Salário</option><option value="Outro">Outro</option>
-                            </select>
-                        </div>
+                        <div class="filter-group"><label>Tipo</label><select id="filtroTipo" onchange="filtrarFinanceiro()"><option value="">Todos</option><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
+                        <div class="filter-group"><label>Motivo</label><select id="filtroMotivo" onchange="filtrarFinanceiro()"><option value="">Todos</option></select></div>
                         <button onclick="limparFiltros()">Limpar Filtros</button>
                     </div>
                     <div class="btn-row">
@@ -345,12 +306,11 @@
                     <h2>🗺️ Rotas</h2>
                     <div class="btn-row">
                         <button onclick="openAddModal('rota')">+ Adicionar Rota</button>
+                        <button onclick="openAddModal('rotaFixa')">📌 Nova Rota Fixa</button>
                         <button class="btn-excel" onclick="exportarExcel('rotas')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead>
-                            <tr><th>Veículo</th><th>Motorista</th><th>Saída</th><th>Destino</th><th>Início</th><th>Fim</th><th>KM</th><th>Tempo</th><th>Ações</th></tr>
-                        </thead>
+                        <thead><tr><th>Veículo</th><th>Motorista</th><th>Saída</th><th>Destino</th><th>Rota Fixa</th><th>Início</th><th>Fim</th><th>KM</th><th>Tempo</th><th>Ações</th></tr></thead>
                         <tbody id="rotasTable"></tbody>
                     </table>
                 </div>
@@ -358,7 +318,14 @@
                 <!-- DESEMPENHO -->
                 <div id="desempenho" class="page">
                     <h2>📈 Desempenho</h2>
-                    <div id="desempenhoContent"></div>
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('desempenhoGeral')">📈 Geral</button>
+                        <button class="tab" onclick="switchTab('desempenhoConjunto')">🚗👨‍✈️ Desempenho Conjunto</button>
+                        <button class="tab" onclick="switchTab('desempenhoRotaFixa')">📌 Rotas Fixas</button>
+                    </div>
+                    <div id="desempenhoGeral" class="tab-content active"></div>
+                    <div id="desempenhoConjunto" class="tab-content"></div>
+                    <div id="desempenhoRotaFixa" class="tab-content"></div>
                 </div>
  
                 <!-- ANIVERSÁRIOS -->
@@ -394,7 +361,6 @@
         </div>
     </div>
  
-    <!-- MODAL -->
     <div id="modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
