@@ -1,3 +1,4 @@
+
 // ==== CONFIGURAÇÃO SUPABASE ====
 const SUPABASE_URL = 'https://xzzfkenqdxetkvalnoix.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_4yK_vp6F3Nb8cZkFuhQt3A_Fhxw6A7h';
@@ -8,10 +9,10 @@ let currentEmpresa = null;
 let chartGastos = null, chartCategorias = null, chartRelatorio = null;
 let data = {
     motoristas: [], funcionarios: [], veiculos: [], clientes: [],
-    abastecimentos: [], pneus: [], oleos: [], preventivas: [], multas: [],
+    abastecimentos: [], pneus: [], oleos: [], preventivas: [], corretivas: [], multas: [],
     bancos: [], financeiro: [], rotas: [],
     produtos: [], estoque_movimentacoes: [], agenda: [], turismo_viagens: [],
-    rotas_fixas: [], financeiro_categorias: [],
+    rotas_fixas: [], financeiro_categorias: [], bomba_cargas: [],
 };
  
 // ==== AUTENTICAÇÃO ====
@@ -21,12 +22,12 @@ async function checkAuth() {
     currentUser = session.user;
  
     const { data: perfil, error } = await sb
-        .from('perfis').select('nome, empresa_id, empresas(id, nome)')
+        .from('perfis').select('nome, empresa_id, empresas(id, nome, bomba_alerta_minimo)')
         .eq('id', currentUser.id).single();
  
     if (error || !perfil) { showLoginPage(); return; }
  
-    currentEmpresa = { id: perfil.empresa_id, nome: perfil.empresas.nome };
+    currentEmpresa = { id: perfil.empresa_id, nome: perfil.empresas.nome, bomba_alerta_minimo: perfil.empresas.bomba_alerta_minimo };
     document.getElementById('userEmail').textContent = currentUser.email;
     document.getElementById('empresaNome').textContent = `(${currentEmpresa.nome})`;
     await loadData();
@@ -121,42 +122,49 @@ function switchTab(tab) {
     document.getElementById(tab).classList.add('active');
     parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     event.target.classList.add('active');
+    if (tab === 'bomba') loadBomba();
 }
  
 // ==== EXPORTAR EXCEL ====
 const EXPORT_CONFIG = {
     motoristas: { titulo: 'Motoristas', campos: [
         ['nome','Nome'], ['cpf','CPF'], ['telefone','Telefone'], ['endereco','Endereço'],
-        ['data_nascimento','Data Nascimento'], ['cnh_validade','Validade CNH']
+        ['data_nascimento','Data Nascimento'], ['cnh_validade','Validade CNH'], ['salario','Salário']
     ]},
     funcionarios: { titulo: 'Funcionarios', campos: [
-        ['nome','Nome'], ['cpf','CPF'], ['telefone','Telefone'], ['endereco','Endereço'],
-        ['data_nascimento','Data Nascimento'], ['status','Status'],
+        ['nome','Nome'], ['funcao','Função'], ['cpf','CPF'], ['telefone','Telefone'], ['endereco','Endereço'],
+        ['data_nascimento','Data Nascimento'], ['status','Status'], ['salario','Salário'],
         ['data_admissao','Data Admissão'], ['data_demissao','Data Demissão'],
         ['experiencia_inicio','Início Experiência'], ['experiencia_fim','Fim Experiência']
     ]},
     veiculos: { titulo: 'Veiculos', campos: [
-        ['placa','Placa'], ['marca','Marca'], ['modelo','Modelo'], ['ano','Ano'], ['km_atual','KM Atual'],
-        ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
+        ['placa','Placa'], ['marca','Marca'], ['modelo','Modelo'], ['ano','Ano'], ['chassi','Chassi'], ['renavam','Renavam'],
+        ['km_atual','KM Atual'], ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
     ]},
     clientes: { titulo: 'Clientes', campos: [
-        ['nome','Nome'], ['cpf_cnpj','CPF/CNPJ'], ['telefone','Telefone'], ['endereco','Endereço'], ['data_nascimento','Data Nascimento']
+        ['nome','Nome'], ['cpf_cnpj','CPF/CNPJ'], ['telefone','Telefone'], ['rua','Rua'], ['numero','Número'],
+        ['bairro','Bairro'], ['cidade','Cidade'], ['uf','UF'], ['cep','CEP'], ['data_nascimento','Data Nascimento']
     ]},
     abastecimentos: { titulo: 'Abastecimentos', campos: [
-        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['km','KM'], ['litros','Litros'],
+        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['fonte','Fonte'], ['data','Data'], ['km','KM'], ['litros','Litros'],
         ['valor_litro','Valor/L'], ['valor_total','Valor Total'], ['kml','KM/L']
     ]},
     pneus: { titulo: 'Pneus', campos: [
-        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['descricao','Descrição'],
-        ['km_atual','KM Atual'], ['km_proxima','KM Próxima Troca'], ['valor','Valor']
+        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['tipo','Tipo'], ['oficina','Oficina'],
+        ['quantidade','Quantidade'], ['valor_unitario','Valor Unitário'], ['valor','Valor Total'],
+        ['km_atual','KM Atual'], ['km_proxima','KM Próxima Troca']
     ]},
     oleos: { titulo: 'Oleos', campos: [
-        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['tipo','Tipo'],
+        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['tipo','Tipo'], ['lugar','Lugar'], ['litragem','Litragem'],
         ['km_atual','KM Atual'], ['km_proxima','KM Próxima Troca'], ['valor','Valor']
     ]},
     preventivas: { titulo: 'Preventivas', campos: [
         [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['descricao','Descrição'],
         ['km_atual','KM Atual'], ['km_proxima','KM Próxima Troca'], ['valor','Valor']
+    ]},
+    corretivas: { titulo: 'Corretivas', campos: [
+        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['descricao','Descrição'], ['oficina','Oficina'],
+        ['km_atual','KM Atual'], ['valor','Valor']
     ]},
     multas: { titulo: 'Multas', campos: [
         [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['descricao','Descrição'], ['valor','Valor']
@@ -188,8 +196,13 @@ const EXPORT_CONFIG = {
         [item => motoristaNome(item.motorista_id), 'Motorista'],
         [item => (data.clientes.find(c => c.id === item.cliente_id)?.nome || 'N/A'), 'Cliente'],
         [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['km','KM'],
-        ['valor_viagem','Valor Viagem'], ['valor_motorista','Valor Motorista'],
+        ['valor_viagem','Valor Viagem'], ['valor_pedagio','Pedágio'], ['combustivel_litros','Litros Combustível'],
+        ['combustivel_valor','Valor Combustível'], ['valor_diaria','Diária Motorista'],
+        ['outros_descricao','Outros (descrição)'], ['outros_valor','Outros (valor)'],
         [item => (item.acerto_motorista_pago ? 'Pago' : 'Pendente'), 'Acerto Motorista']
+    ]},
+    bomba_cargas: { titulo: 'Bomba_Combustivel', campos: [
+        ['data','Data'], ['litros','Litros'], ['valor_total','Valor Total'], ['fornecedor','Fornecedor']
     ]},
 };
  
@@ -225,19 +238,21 @@ function custoPorKmVeiculo(veiculoId) {
     const kmTotal = rotasVeiculo.reduce((s, r) => s + kmPercorrido(r), 0);
     let gastos = 0;
     gastos += data.abastecimentos.filter(a => a.veiculo_id === veiculoId).reduce((s,a) => s + Number(a.valor_total), 0);
-    gastos += data.pneus.filter(p => p.veiculo_id === veiculoId).reduce((s,p) => s + Number(p.valor), 0);
-    gastos += data.oleos.filter(o => o.veiculo_id === veiculoId).reduce((s,o) => s + Number(o.valor), 0);
-    gastos += data.preventivas.filter(p => p.veiculo_id === veiculoId).reduce((s,p) => s + Number(p.valor), 0);
-    gastos += data.multas.filter(m => m.veiculo_id === veiculoId).reduce((s,m) => s + Number(m.valor), 0);
+    gastos += data.pneus.filter(p => p.veiculo_id === veiculoId).reduce((s,p) => s + Number(p.valor||0), 0);
+    gastos += data.oleos.filter(o => o.veiculo_id === veiculoId).reduce((s,o) => s + Number(o.valor||0), 0);
+    gastos += data.preventivas.filter(p => p.veiculo_id === veiculoId).reduce((s,p) => s + Number(p.valor||0), 0);
+    gastos += data.corretivas.filter(c => c.veiculo_id === veiculoId).reduce((s,c) => s + Number(c.valor||0), 0);
+    gastos += data.multas.filter(m => m.veiculo_id === veiculoId).reduce((s,m) => s + Number(m.valor||0), 0);
     return kmTotal > 0 ? gastos / kmTotal : 0;
 }
 function gastoRotaInstancia(r) {
     const dataRota = new Date(r.data_inicio).toDateString();
     let gasto = 0;
     data.abastecimentos.forEach(a => { if (a.veiculo_id===r.veiculo_id && new Date(a.data).toDateString()===dataRota) gasto += Number(a.valor_total); });
-    data.pneus.forEach(p => { if (p.veiculo_id===r.veiculo_id && new Date(p.data).toDateString()===dataRota) gasto += Number(p.valor); });
-    data.oleos.forEach(o => { if (o.veiculo_id===r.veiculo_id && new Date(o.data).toDateString()===dataRota) gasto += Number(o.valor); });
-    data.preventivas.forEach(p => { if (p.veiculo_id===r.veiculo_id && new Date(p.data).toDateString()===dataRota) gasto += Number(p.valor); });
+    data.pneus.forEach(p => { if (p.veiculo_id===r.veiculo_id && new Date(p.data).toDateString()===dataRota) gasto += Number(p.valor||0); });
+    data.oleos.forEach(o => { if (o.veiculo_id===r.veiculo_id && new Date(o.data).toDateString()===dataRota) gasto += Number(o.valor||0); });
+    data.preventivas.forEach(p => { if (p.veiculo_id===r.veiculo_id && new Date(p.data).toDateString()===dataRota) gasto += Number(p.valor||0); });
+    data.corretivas.forEach(c => { if (c.veiculo_id===r.veiculo_id && new Date(c.data).toDateString()===dataRota) gasto += Number(c.valor||0); });
     return gasto;
 }
 function alertErro(error) { alert('Erro: ' + (error?.message || 'algo deu errado. Tente novamente.')); }
@@ -248,6 +263,13 @@ async function atualizarKmVeiculo(veiculoId, novoKm) {
     if (veiculo && novoKm > Number(veiculo.km_atual || 0)) {
         await sb.from('veiculos').update({ km_atual: novoKm }).eq('id', veiculoId);
     }
+}
+ 
+function nivelBomba() {
+    const totalCarregado = data.bomba_cargas.reduce((s,c) => s + Number(c.litros), 0);
+    const totalDispensado = data.abastecimentos.filter(a => a.fonte === 'bomba').reduce((s,a) => s + Number(a.litros), 0);
+    const gastoTotal = data.bomba_cargas.reduce((s,c) => s + Number(c.valor_total), 0);
+    return { atual: totalCarregado - totalDispensado, totalCarregado, totalDispensado, gastoTotal };
 }
  
 // ==== MODAL ====
@@ -270,12 +292,17 @@ function openAddModal(type) {
                 <div class="form-group"><label>Data de Nascimento</label><input type="date" id="motoristaDataNasc"></div>
                 <div class="form-group"><label>Validade da CNH</label><input type="date" id="motoristaCnhValidade"></div>
             </div>
+            <div class="form-group"><label>Salário</label><input type="number" id="motoristaSalario" step="0.01"></div>
             <button onclick="addMotorista()">Adicionar</button>
         `;
     } else if (type === 'funcionario') {
         modalTitle.textContent = 'Adicionar Funcionário';
         html = `
             <div class="form-group"><label>Nome</label><input type="text" id="funcionarioNome"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Função</label><input type="text" id="funcionarioFuncao" placeholder="Ex: Auxiliar, Mecânico, Administrativo"></div>
+                <div class="form-group"><label>Salário</label><input type="number" id="funcionarioSalario" step="0.01"></div>
+            </div>
             <div class="form-row">
                 <div class="form-group"><label>CPF</label><input type="text" id="funcionarioCPF"></div>
                 <div class="form-group"><label>Telefone</label><input type="text" id="funcionarioTelefone"></div>
@@ -309,6 +336,10 @@ function openAddModal(type) {
                 <div class="form-group"><label>Modelo</label><input type="text" id="veiculoModelo"></div>
                 <div class="form-group"><label>Ano</label><input type="number" id="veiculoAno"></div>
             </div>
+            <div class="form-row">
+                <div class="form-group"><label>Chassi</label><input type="text" id="veiculoChassi"></div>
+                <div class="form-group"><label>Renavam</label><input type="text" id="veiculoRenavam"></div>
+            </div>
             <div class="form-group"><label>KM Atual</label><input type="number" id="veiculoKmAtual" value="0"></div>
             <p style="font-size:12px; color:#666; margin: 5px 0 10px;">Os campos abaixo são opcionais:</p>
             <div class="form-row">
@@ -326,7 +357,18 @@ function openAddModal(type) {
                 <div class="form-group"><label>CPF/CNPJ</label><input type="text" id="clienteCPF"></div>
                 <div class="form-group"><label>Telefone</label><input type="text" id="clienteTelefone"></div>
             </div>
-            <div class="form-group"><label>Endereço</label><input type="text" id="clienteEndereco"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Rua</label><input type="text" id="clienteRua"></div>
+                <div class="form-group"><label>Número</label><input type="text" id="clienteNumero"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Bairro</label><input type="text" id="clienteBairro"></div>
+                <div class="form-group"><label>CEP</label><input type="text" id="clienteCep"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Cidade</label><input type="text" id="clienteCidade"></div>
+                <div class="form-group"><label>UF</label><input type="text" id="clienteUf" maxlength="2" placeholder="Ex: SP"></div>
+            </div>
             <div class="form-group"><label>Data de Nascimento</label><input type="date" id="clienteDataNasc"></div>
             <button onclick="addCliente()">Adicionar</button>
         `;
@@ -335,6 +377,10 @@ function openAddModal(type) {
         const opts = data.veiculos.map(v => `<option value="${v.id}">${v.placa}</option>`).join('');
         html = `
             <div class="form-group"><label>Veículo</label><select id="abastecimentoVeiculo">${opts}</select></div>
+            <div class="form-group">
+                <label>Fonte do Combustível</label>
+                <select id="abastecimentoFonte"><option value="posto">Posto Externo</option><option value="bomba">Bomba Própria (nível atual: ${nivelBomba().atual.toFixed(0)} L)</option></select>
+            </div>
             <div class="form-row">
                 <div class="form-group"><label>Data</label><input type="date" id="abastecimentoData"></div>
                 <div class="form-group"><label>KM</label><input type="number" id="abastecimentoKM"></div>
@@ -353,13 +399,18 @@ function openAddModal(type) {
             <div class="form-group"><label>Veículo</label><select id="pneuVeiculo" onchange="autoPreencherKm('pneu')">${opts}</select></div>
             <div class="form-row">
                 <div class="form-group"><label>Data</label><input type="date" id="pneuData"></div>
-                <div class="form-group"><label>Descrição</label><input type="text" id="pneuDescricao"></div>
+                <div class="form-group"><label>Tipo</label><select id="pneuTipo"><option value="Alinhamento">Alinhamento</option><option value="Troca de Pneus">Troca de Pneus</option><option value="Balanceamento">Balanceamento</option></select></div>
             </div>
+            <div class="form-group"><label>Oficina</label><input type="text" id="pneuOficina"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Quantidade de Pneus</label><input type="number" id="pneuQuantidade" value="1" onchange="calcularValorTotalPneu()"></div>
+                <div class="form-group"><label>Valor Unitário</label><input type="number" id="pneuValorUnitario" step="0.01" onchange="calcularValorTotalPneu()"></div>
+            </div>
+            <div class="form-group"><label>Valor Total</label><input type="number" id="pneuValor" step="0.01" readonly></div>
             <div class="form-row">
                 <div class="form-group"><label>KM Atual</label><input type="number" id="pneuKMAtual"></div>
                 <div class="form-group"><label>KM Próxima Troca</label><input type="number" id="pneuKMProxima"></div>
             </div>
-            <div class="form-group"><label>Valor</label><input type="number" id="pneuValor" step="0.01"></div>
             <button onclick="addPneu()">Adicionar</button>
         `;
     } else if (type === 'oleo') {
@@ -369,7 +420,11 @@ function openAddModal(type) {
             <div class="form-group"><label>Veículo</label><select id="oleoVeiculo" onchange="autoPreencherKm('oleo')">${opts}</select></div>
             <div class="form-row">
                 <div class="form-group"><label>Data</label><input type="date" id="oleoData"></div>
-                <div class="form-group"><label>Tipo</label><input type="text" id="oleoTipo"></div>
+                <div class="form-group"><label>Tipo</label><input type="text" id="oleoTipo" placeholder="Ex: 5W30"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Lugar</label><input type="text" id="oleoLugar" placeholder="Oficina/local"></div>
+                <div class="form-group"><label>Litragem</label><input type="number" id="oleoLitragem" step="0.01"></div>
             </div>
             <div class="form-row">
                 <div class="form-group"><label>KM Atual</label><input type="number" id="oleoKMAtual"></div>
@@ -393,6 +448,41 @@ function openAddModal(type) {
             </div>
             <div class="form-group"><label>Valor</label><input type="number" id="preventivaValor" step="0.01"></div>
             <button onclick="addPreventiva()">Adicionar</button>
+        `;
+    } else if (type === 'corretiva') {
+        modalTitle.textContent = 'Adicionar Manutenção Corretiva';
+        const opts = data.veiculos.map(v => `<option value="${v.id}">${v.placa}</option>`).join('');
+        html = `
+            <div class="form-group"><label>Veículo</label><select id="corretivaVeiculo" onchange="autoPreencherKm('corretiva')">${opts}</select></div>
+            <div class="form-row">
+                <div class="form-group"><label>Data</label><input type="date" id="corretivaData"></div>
+                <div class="form-group"><label>Descrição do Problema</label><input type="text" id="corretivaDescricao"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Oficina</label><input type="text" id="corretivaOficina"></div>
+                <div class="form-group"><label>KM Atual</label><input type="number" id="corretivaKMAtual"></div>
+            </div>
+            <div class="form-group"><label>Valor</label><input type="number" id="corretivaValor" step="0.01"></div>
+            <button onclick="addCorretiva()">Adicionar</button>
+        `;
+    } else if (type === 'cargaBomba') {
+        modalTitle.textContent = 'Registrar Carga na Bomba';
+        html = `
+            <div class="form-row">
+                <div class="form-group"><label>Data</label><input type="date" id="cargaBombaData"></div>
+                <div class="form-group"><label>Litros</label><input type="number" id="cargaBombaLitros" step="0.01"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Valor Total</label><input type="number" id="cargaBombaValor" step="0.01"></div>
+                <div class="form-group"><label>Fornecedor</label><input type="text" id="cargaBombaFornecedor"></div>
+            </div>
+            <button onclick="addCargaBomba()">Registrar</button>
+        `;
+    } else if (type === 'alertaBomba') {
+        modalTitle.textContent = 'Configurar Alerta Mínimo da Bomba';
+        html = `
+            <div class="form-group"><label>Alertar quando o nível estiver abaixo de (litros)</label><input type="number" id="alertaBombaValor" value="${currentEmpresa.bomba_alerta_minimo}"></div>
+            <button onclick="salvarAlertaBomba()">Salvar</button>
         `;
     } else if (type === 'multa') {
         modalTitle.textContent = 'Adicionar Multa';
@@ -428,10 +518,7 @@ function openAddModal(type) {
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Tipo</label><select id="financeiroTipo"><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
-                <div class="form-group">
-                    <label>Motivo</label>
-                    <select id="financeiroMotivo">${catOpts}<option value="__nova__">+ Nova categoria...</option></select>
-                </div>
+                <div class="form-group"><label>Motivo</label><select id="financeiroMotivo">${catOpts}<option value="__nova__">+ Nova categoria...</option></select></div>
             </div>
             <div class="form-group"><label>Descrição</label><textarea id="financeiroDescricao"></textarea></div>
             <div class="form-group"><label>Valor</label><input type="number" id="financeiroValor" step="0.01"></div>
@@ -447,10 +534,7 @@ function openAddModal(type) {
                 <div class="form-group"><label>Veículo</label><select id="rotaVeiculo">${veiculosOptions}</select></div>
                 <div class="form-group"><label>Motorista</label><select id="rotaMotorista">${motoristasOptions}</select></div>
             </div>
-            <div class="form-group">
-                <label>Rota Fixa (opcional)</label>
-                <select id="rotaFixaId"><option value="">Nenhuma / rota avulsa</option>${rotasFixasOptions}</select>
-            </div>
+            <div class="form-group"><label>Rota Fixa (opcional)</label><select id="rotaFixaId"><option value="">Nenhuma / rota avulsa</option>${rotasFixasOptions}</select></div>
             <div class="form-row">
                 <div class="form-group"><label>Local Saída</label><input type="text" id="rotaLocalSaida"></div>
                 <div class="form-group"><label>Destino</label><input type="text" id="rotaDestino"></div>
@@ -543,9 +627,18 @@ function openAddModal(type) {
                 <div class="form-group"><label>Data</label><input type="date" id="viagemData"></div>
                 <div class="form-group"><label>Horário</label><input type="time" id="viagemHorario"></div>
             </div>
+            <div class="form-group"><label>Valor da Viagem</label><input type="number" id="viagemValor" step="0.01"></div>
             <div class="form-row">
-                <div class="form-group"><label>Valor da Viagem</label><input type="number" id="viagemValor" step="0.01"></div>
-                <div class="form-group"><label>Valor para o Motorista</label><input type="number" id="viagemValorMotorista" step="0.01"></div>
+                <div class="form-group"><label>Valor do Pedágio</label><input type="number" id="viagemPedagio" step="0.01"></div>
+                <div class="form-group"><label>Valor da Diária do Motorista</label><input type="number" id="viagemDiaria" step="0.01"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Litros de Combustível</label><input type="number" id="viagemCombustivelLitros" step="0.01"></div>
+                <div class="form-group"><label>Valor do Combustível</label><input type="number" id="viagemCombustivelValor" step="0.01"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Outros (descrição)</label><input type="text" id="viagemOutrosDescricao" placeholder="Ex: estacionamento"></div>
+                <div class="form-group"><label>Outros (valor)</label><input type="number" id="viagemOutrosValor" step="0.01"></div>
             </div>
             <div class="form-group"><label>Acerto do Motorista</label><select id="viagemAcerto"><option value="false">Pendente</option><option value="true">Pago</option></select></div>
             <button onclick="addViagem()">Adicionar</button>
@@ -579,6 +672,12 @@ function autoPreencherKm(prefixo) {
     if (veiculo) document.getElementById(`${prefixo}KMAtual`).value = veiculo.km_atual || 0;
 }
  
+function calcularValorTotalPneu() {
+    const qtd = parseFloat(document.getElementById('pneuQuantidade').value) || 0;
+    const valorUnit = parseFloat(document.getElementById('pneuValorUnitario').value) || 0;
+    document.getElementById('pneuValor').value = (qtd * valorUnit).toFixed(2);
+}
+ 
 function simularViagem() {
     const veiculoId = document.getElementById('simVeiculo').value;
     const km = parseFloat(document.getElementById('simKM').value);
@@ -607,14 +706,17 @@ async function addMotorista() {
     const endereco = document.getElementById('motoristaEndereco').value;
     const data_nascimento = document.getElementById('motoristaDataNasc').value;
     const cnh_validade = document.getElementById('motoristaCnhValidade').value || null;
+    const salario = parseFloat(document.getElementById('motoristaSalario').value) || null;
     if (!nome || !cpf || !telefone || !endereco || !data_nascimento) { alert('Preencha todos os campos obrigatórios'); return; }
-    const { error } = await sb.from('motoristas').insert({ empresa_id: currentEmpresa.id, nome, cpf, telefone, endereco, data_nascimento, cnh_validade });
+    const { error } = await sb.from('motoristas').insert({ empresa_id: currentEmpresa.id, nome, cpf, telefone, endereco, data_nascimento, cnh_validade, salario });
     if (error) { alertErro(error); return; }
     closeModal(); await loadData(); updateDashboard();
 }
  
 async function addFuncionario() {
     const nome = document.getElementById('funcionarioNome').value;
+    const funcao = document.getElementById('funcionarioFuncao').value;
+    const salario = parseFloat(document.getElementById('funcionarioSalario').value) || null;
     const cpf = document.getElementById('funcionarioCPF').value;
     const telefone = document.getElementById('funcionarioTelefone').value;
     const endereco = document.getElementById('funcionarioEndereco').value;
@@ -625,7 +727,7 @@ async function addFuncionario() {
     const experiencia_inicio = document.getElementById('funcionarioExpInicio')?.value || null;
     const experiencia_fim = document.getElementById('funcionarioExpFim')?.value || null;
     if (!nome || !cpf || !telefone || !endereco || !data_nascimento) { alert('Preencha todos os campos obrigatórios'); return; }
-    const { error } = await sb.from('funcionarios').insert({ empresa_id: currentEmpresa.id, nome, cpf, telefone, endereco, data_nascimento, status, data_admissao, data_demissao, experiencia_inicio, experiencia_fim });
+    const { error } = await sb.from('funcionarios').insert({ empresa_id: currentEmpresa.id, nome, funcao, salario, cpf, telefone, endereco, data_nascimento, status, data_admissao, data_demissao, experiencia_inicio, experiencia_fim });
     if (error) { alertErro(error); return; }
     closeModal(); await loadData(); updateDashboard();
 }
@@ -635,13 +737,15 @@ async function addVeiculo() {
     const marca = document.getElementById('veiculoMarca').value;
     const modelo = document.getElementById('veiculoModelo').value;
     const ano = document.getElementById('veiculoAno').value;
+    const chassi = document.getElementById('veiculoChassi').value;
+    const renavam = document.getElementById('veiculoRenavam').value;
     const km_atual = parseFloat(document.getElementById('veiculoKmAtual').value) || 0;
     const tacografo_validade = document.getElementById('veiculoTacografoValidade').value || null;
     const apolice_validade = document.getElementById('veiculoApoliceValidade').value || null;
     const crlv_ano = document.getElementById('veiculoCrlvAno').value || null;
     if (!placa || !marca || !modelo || !ano) { alert('Preencha placa, marca, modelo e ano'); return; }
     const { error } = await sb.from('veiculos').insert({
-        empresa_id: currentEmpresa.id, placa, marca, modelo, ano: parseInt(ano), km_atual,
+        empresa_id: currentEmpresa.id, placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual,
         tacografo_validade, apolice_validade, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null
     });
     if (error) { alertErro(error); return; }
@@ -652,26 +756,40 @@ async function addCliente() {
     const nome = document.getElementById('clienteNome').value;
     const cpf_cnpj = document.getElementById('clienteCPF').value;
     const telefone = document.getElementById('clienteTelefone').value;
-    const endereco = document.getElementById('clienteEndereco').value;
+    const rua = document.getElementById('clienteRua').value;
+    const numero = document.getElementById('clienteNumero').value;
+    const bairro = document.getElementById('clienteBairro').value;
+    const cidade = document.getElementById('clienteCidade').value;
+    const uf = document.getElementById('clienteUf').value;
+    const cep = document.getElementById('clienteCep').value;
     const data_nascimento = document.getElementById('clienteDataNasc').value;
-    if (!nome || !cpf_cnpj || !telefone || !endereco || !data_nascimento) { alert('Preencha todos os campos'); return; }
-    const { error } = await sb.from('clientes').insert({ empresa_id: currentEmpresa.id, nome, cpf_cnpj, telefone, endereco, data_nascimento });
+    if (!nome || !cpf_cnpj || !telefone || !rua || !data_nascimento) { alert('Preencha ao menos nome, CPF/CNPJ, telefone, rua e nascimento'); return; }
+    const { error } = await sb.from('clientes').insert({ empresa_id: currentEmpresa.id, nome, cpf_cnpj, telefone, rua, numero, bairro, cidade, uf, cep, data_nascimento });
     if (error) { alertErro(error); return; }
     closeModal(); await loadData(); updateDashboard();
 }
  
 async function addAbastecimento() {
     const veiculo_id = document.getElementById('abastecimentoVeiculo').value;
+    const fonte = document.getElementById('abastecimentoFonte').value;
     const data_abast = document.getElementById('abastecimentoData').value;
     const km = parseFloat(document.getElementById('abastecimentoKM').value);
     const litros = parseFloat(document.getElementById('abastecimentoLitros').value);
     const valor_litro = parseFloat(document.getElementById('abastecimentoValorL').value);
     const valor_total = parseFloat(document.getElementById('abastecimentoValorTotal').value);
     if (!veiculo_id || !data_abast || !km || !litros || !valor_litro) { alert('Preencha todos os campos'); return; }
+ 
+    if (fonte === 'bomba') {
+        const nivel = nivelBomba();
+        if (litros > nivel.atual) {
+            if (!confirm(`A bomba só tem ${nivel.atual.toFixed(0)} L disponíveis. Isso vai deixar o nível negativo. Continuar mesmo assim?`)) return;
+        }
+    }
+ 
     const anteriores = data.abastecimentos.filter(a => a.veiculo_id === veiculo_id).sort((a,b) => new Date(b.data) - new Date(a.data));
     let kml = 0;
     if (anteriores.length > 0) { const diff = km - anteriores[0].km; kml = diff > 0 ? diff / litros : 0; }
-    const { error } = await sb.from('abastecimentos').insert({ empresa_id: currentEmpresa.id, veiculo_id, data: data_abast, km, litros, valor_litro, valor_total, kml });
+    const { error } = await sb.from('abastecimentos').insert({ empresa_id: currentEmpresa.id, veiculo_id, fonte, data: data_abast, km, litros, valor_litro, valor_total, kml });
     if (error) { alertErro(error); return; }
     await atualizarKmVeiculo(veiculo_id, km);
     closeModal(); await loadData(); updateDashboard();
@@ -680,12 +798,15 @@ async function addAbastecimento() {
 async function addPneu() {
     const veiculo_id = document.getElementById('pneuVeiculo').value;
     const data_pneu = document.getElementById('pneuData').value;
-    const descricao = document.getElementById('pneuDescricao').value;
+    const tipo = document.getElementById('pneuTipo').value;
+    const oficina = document.getElementById('pneuOficina').value;
+    const quantidade = parseInt(document.getElementById('pneuQuantidade').value) || 1;
+    const valor_unitario = parseFloat(document.getElementById('pneuValorUnitario').value) || 0;
+    const valor = parseFloat(document.getElementById('pneuValor').value) || 0;
     const km_atual = parseFloat(document.getElementById('pneuKMAtual').value);
-    const valor = parseFloat(document.getElementById('pneuValor').value);
     const km_proxima = parseFloat(document.getElementById('pneuKMProxima').value);
-    if (!veiculo_id || !data_pneu || !descricao || !km_atual || !valor || !km_proxima) { alert('Preencha todos os campos'); return; }
-    const { error } = await sb.from('pneus').insert({ empresa_id: currentEmpresa.id, veiculo_id, data: data_pneu, descricao, km_atual, valor, km_proxima });
+    if (!veiculo_id || !data_pneu || !km_atual) { alert('Preencha ao menos veículo, data e KM atual'); return; }
+    const { error } = await sb.from('pneus').insert({ empresa_id: currentEmpresa.id, veiculo_id, data: data_pneu, tipo, oficina, quantidade, valor_unitario, valor, km_atual, km_proxima });
     if (error) { alertErro(error); return; }
     await atualizarKmVeiculo(veiculo_id, km_atual);
     closeModal(); await loadData(); updateDashboard();
@@ -695,11 +816,13 @@ async function addOleo() {
     const veiculo_id = document.getElementById('oleoVeiculo').value;
     const data_oleo = document.getElementById('oleoData').value;
     const tipo = document.getElementById('oleoTipo').value;
+    const lugar = document.getElementById('oleoLugar').value;
+    const litragem = parseFloat(document.getElementById('oleoLitragem').value) || null;
     const km_atual = parseFloat(document.getElementById('oleoKMAtual').value);
     const valor = parseFloat(document.getElementById('oleoValor').value);
     const km_proxima = parseFloat(document.getElementById('oleoKMProxima').value);
-    if (!veiculo_id || !data_oleo || !tipo || !km_atual || !valor || !km_proxima) { alert('Preencha todos os campos'); return; }
-    const { error } = await sb.from('oleos').insert({ empresa_id: currentEmpresa.id, veiculo_id, data: data_oleo, tipo, km_atual, valor, km_proxima });
+    if (!veiculo_id || !data_oleo || !tipo || !km_atual || !valor || !km_proxima) { alert('Preencha todos os campos obrigatórios'); return; }
+    const { error } = await sb.from('oleos').insert({ empresa_id: currentEmpresa.id, veiculo_id, data: data_oleo, tipo, lugar, litragem, km_atual, valor, km_proxima });
     if (error) { alertErro(error); return; }
     await atualizarKmVeiculo(veiculo_id, km_atual);
     closeModal(); await loadData(); updateDashboard();
@@ -717,6 +840,40 @@ async function addPreventiva() {
     if (error) { alertErro(error); return; }
     await atualizarKmVeiculo(veiculo_id, km_atual);
     closeModal(); await loadData(); updateDashboard();
+}
+ 
+async function addCorretiva() {
+    const veiculo_id = document.getElementById('corretivaVeiculo').value;
+    const data_cor = document.getElementById('corretivaData').value;
+    const descricao = document.getElementById('corretivaDescricao').value;
+    const oficina = document.getElementById('corretivaOficina').value;
+    const km_atual = parseFloat(document.getElementById('corretivaKMAtual').value) || null;
+    const valor = parseFloat(document.getElementById('corretivaValor').value);
+    if (!veiculo_id || !data_cor || !descricao || !valor) { alert('Preencha veículo, data, descrição e valor'); return; }
+    const { error } = await sb.from('corretivas').insert({ empresa_id: currentEmpresa.id, veiculo_id, data: data_cor, descricao, oficina, km_atual, valor });
+    if (error) { alertErro(error); return; }
+    if (km_atual) await atualizarKmVeiculo(veiculo_id, km_atual);
+    closeModal(); await loadData(); updateDashboard();
+}
+ 
+async function addCargaBomba() {
+    const data_carga = document.getElementById('cargaBombaData').value;
+    const litros = parseFloat(document.getElementById('cargaBombaLitros').value);
+    const valor_total = parseFloat(document.getElementById('cargaBombaValor').value);
+    const fornecedor = document.getElementById('cargaBombaFornecedor').value;
+    if (!data_carga || !litros || !valor_total) { alert('Preencha data, litros e valor total'); return; }
+    const { error } = await sb.from('bomba_cargas').insert({ empresa_id: currentEmpresa.id, data: data_carga, litros, valor_total, fornecedor });
+    if (error) { alertErro(error); return; }
+    closeModal(); await loadData(); loadBomba(); updateDashboard();
+}
+ 
+async function salvarAlertaBomba() {
+    const valor = parseFloat(document.getElementById('alertaBombaValor').value);
+    if (isNaN(valor)) { alert('Informe um número válido'); return; }
+    const { error } = await sb.from('empresas').update({ bomba_alerta_minimo: valor }).eq('id', currentEmpresa.id);
+    if (error) { alertErro(error); return; }
+    currentEmpresa.bomba_alerta_minimo = valor;
+    closeModal(); loadBomba();
 }
  
 async function addMulta() {
@@ -755,11 +912,9 @@ async function addFinanceiro() {
         const { error: errCat } = await sb.from('financeiro_categorias').insert({ empresa_id: currentEmpresa.id, nome: novaCategoria });
         if (errCat) { alertErro(errCat); return; }
         motivo = novaCategoria;
-        data.financeiro_categorias.push({ nome: novaCategoria });
     }
  
     if (!data_fin || !banco_id || !tipo || !motivo || !valor) { alert('Preencha todos os campos obrigatórios'); return; }
- 
     const { error } = await sb.from('financeiro').insert({ empresa_id: currentEmpresa.id, banco_id, data: data_fin, tipo, motivo, descricao, valor });
     if (error) { alertErro(error); return; }
  
@@ -855,12 +1010,21 @@ async function addViagem() {
     const data_viagem = document.getElementById('viagemData').value;
     const horario = document.getElementById('viagemHorario').value || null;
     const valor_viagem = parseFloat(document.getElementById('viagemValor').value) || 0;
-    const valor_motorista = parseFloat(document.getElementById('viagemValorMotorista').value) || 0;
+    const valor_pedagio = parseFloat(document.getElementById('viagemPedagio').value) || 0;
+    const valor_diaria = parseFloat(document.getElementById('viagemDiaria').value) || 0;
+    const combustivel_litros = parseFloat(document.getElementById('viagemCombustivelLitros').value) || 0;
+    const combustivel_valor = parseFloat(document.getElementById('viagemCombustivelValor').value) || 0;
+    const outros_descricao = document.getElementById('viagemOutrosDescricao').value;
+    const outros_valor = parseFloat(document.getElementById('viagemOutrosValor').value) || 0;
     const acerto_motorista_pago = document.getElementById('viagemAcerto').value === 'true';
+ 
     if (!local_saida || !local_chegada || !data_viagem) { alert('Preencha ao menos saída, chegada e data'); return; }
+ 
     const { error } = await sb.from('turismo_viagens').insert({
         empresa_id: currentEmpresa.id, local_saida, local_chegada, motorista_id, cliente_id, veiculo_id,
-        km, data: data_viagem, horario, valor_viagem, valor_motorista, acerto_motorista_pago,
+        km, data: data_viagem, horario, valor_viagem, valor_pedagio, valor_diaria,
+        combustivel_litros, combustivel_valor, outros_descricao, outros_valor,
+        valor_motorista: valor_diaria, acerto_motorista_pago,
         acerto_data: acerto_motorista_pago ? new Date().toISOString().slice(0,10) : null
     });
     if (error) { alertErro(error); return; }
@@ -873,13 +1037,19 @@ function loadMotoristas() {
         <tr><td>${m.nome}</td><td>${m.cpf}</td><td>${m.telefone}</td><td>${m.endereco}</td>
         <td>${m.data_nascimento ? new Date(m.data_nascimento).toLocaleDateString('pt-BR') : ''}</td>
         <td>${m.cnh_validade ? new Date(m.cnh_validade).toLocaleDateString('pt-BR') : '-'}</td>
+        <td>${m.salario ? 'R$ ' + Number(m.salario).toFixed(2) : '-'}</td>
         <td><button class="btn-small" onclick="deleteItem('motoristas', '${m.id}')">Deletar</button></td></tr>`).join('');
+ 
+    document.getElementById('funcMotoristasTable').innerHTML = data.motoristas.map(m => `
+        <tr><td>${m.nome}</td><td>${m.cpf}</td><td>${m.telefone}</td>
+        <td>${m.salario ? 'R$ ' + Number(m.salario).toFixed(2) : '-'}</td>
+        <td>${m.cnh_validade ? new Date(m.cnh_validade).toLocaleDateString('pt-BR') : '-'}</td></tr>`).join('');
 }
  
 function loadFuncionarios() {
-    const linha = (f, cols) => `<tr><td>${f.nome}</td>${cols}<td><button class="btn-small" onclick="deleteItem('funcionarios', '${f.id}')">Deletar</button></td></tr>`;
+    const linha = (f, cols) => `<tr><td>${f.nome}</td><td>${f.funcao||'-'}</td>${cols}<td><button class="btn-small" onclick="deleteItem('funcionarios', '${f.id}')">Deletar</button></td></tr>`;
     document.getElementById('funcAtivosTable').innerHTML = data.funcionarios.filter(f => f.status === 'ativo').map(f =>
-        linha(f, `<td>${f.cpf}</td><td>${f.telefone}</td><td>${f.data_admissao ? new Date(f.data_admissao).toLocaleDateString('pt-BR') : '-'}</td>`)).join('');
+        linha(f, `<td>${f.cpf}</td><td>${f.telefone}</td><td>${f.data_admissao ? new Date(f.data_admissao).toLocaleDateString('pt-BR') : '-'}</td><td>${f.salario ? 'R$ ' + Number(f.salario).toFixed(2) : '-'}</td>`)).join('');
     document.getElementById('funcDemitidosTable').innerHTML = data.funcionarios.filter(f => f.status === 'demitido').map(f =>
         linha(f, `<td>${f.cpf}</td><td>${f.data_admissao ? new Date(f.data_admissao).toLocaleDateString('pt-BR') : '-'}</td><td>${f.data_demissao ? new Date(f.data_demissao).toLocaleDateString('pt-BR') : '-'}</td>`)).join('');
     document.getElementById('funcExperienciaTable').innerHTML = data.funcionarios.filter(f => f.status === 'experiencia').map(f =>
@@ -888,7 +1058,8 @@ function loadFuncionarios() {
  
 function loadVeiculos() {
     document.getElementById('veiculosTable').innerHTML = data.veiculos.map(v => `
-        <tr><td>${v.placa}</td><td>${v.marca}</td><td>${v.modelo}</td><td>${v.ano}</td><td>${Number(v.km_atual||0).toLocaleString('pt-BR')} km</td>
+        <tr><td>${v.placa}</td><td>${v.marca}</td><td>${v.modelo}</td><td>${v.ano}</td><td>${v.chassi||'-'}</td><td>${v.renavam||'-'}</td>
+        <td>${Number(v.km_atual||0).toLocaleString('pt-BR')} km</td>
         <td>${v.tacografo_validade ? new Date(v.tacografo_validade).toLocaleDateString('pt-BR') : '-'}</td>
         <td>${v.apolice_validade ? new Date(v.apolice_validade).toLocaleDateString('pt-BR') : '-'}</td>
         <td>${v.crlv_ano || '-'}</td>
@@ -897,27 +1068,28 @@ function loadVeiculos() {
  
 function loadClientes() {
     document.getElementById('clientesTable').innerHTML = data.clientes.map(c => `
-        <tr><td>${c.nome}</td><td>${c.cpf_cnpj}</td><td>${c.telefone}</td><td>${c.endereco}</td>
+        <tr><td>${c.nome}</td><td>${c.cpf_cnpj}</td><td>${c.telefone}</td>
+        <td>${c.rua||''}${c.numero ? ', '+c.numero : ''}${c.bairro ? ' - '+c.bairro : ''}</td>
+        <td>${c.cidade||''}${c.uf ? '/'+c.uf : ''}</td><td>${c.cep||'-'}</td>
         <td>${c.data_nascimento ? new Date(c.data_nascimento).toLocaleDateString('pt-BR') : ''}</td>
         <td><button class="btn-small" onclick="deleteItem('clientes', '${c.id}')">Deletar</button></td></tr>`).join('');
 }
  
 function loadAbastecimentos() {
     document.getElementById('abastecimentosTable').innerHTML = data.abastecimentos.map(a => `
-        <tr><td>${veiculoPlaca(a.veiculo_id)}</td><td>${new Date(a.data).toLocaleDateString('pt-BR')}</td>
+        <tr><td>${veiculoPlaca(a.veiculo_id)}</td><td>${a.fonte === 'bomba' ? '🛢️ Bomba' : '⛽ Posto'}</td><td>${new Date(a.data).toLocaleDateString('pt-BR')}</td>
         <td>${a.km}</td><td>${Number(a.litros).toFixed(2)}</td><td>R$ ${Number(a.valor_litro).toFixed(2)}</td>
         <td>R$ ${Number(a.valor_total).toFixed(2)}</td><td>${Number(a.kml).toFixed(2)} km/l</td>
         <td><button class="btn-small" onclick="deleteItem('abastecimentos', '${a.id}')">Deletar</button></td></tr>`).join('');
 }
  
 function loadPneus() {
-    document.getElementById('neusTable').innerHTML = data.pneus.map(p => {
-        const kmFaltando = p.km_proxima - (p.km_atual || 0);
-        const cls = kmFaltando <= 5000 ? 'style="background:#fff3cd;"' : '';
-        return `<tr ${cls}><td>${veiculoPlaca(p.veiculo_id)}</td><td>${new Date(p.data).toLocaleDateString('pt-BR')}</td>
-        <td>${p.descricao}</td><td>${p.km_atual} km</td><td>${p.km_proxima} km</td><td>${kmFaltando} km</td>
-        <td>R$ ${Number(p.valor).toFixed(2)}</td><td><button class="btn-small" onclick="deleteItem('pneus', '${p.id}')">Deletar</button></td></tr>`;
-    }).join('');
+    document.getElementById('neusTable').innerHTML = data.pneus.map(p => `
+        <tr><td>${veiculoPlaca(p.veiculo_id)}</td><td>${new Date(p.data).toLocaleDateString('pt-BR')}</td>
+        <td>${p.tipo||'-'}</td><td>${p.oficina||'-'}</td><td>${p.quantidade||1}</td>
+        <td>R$ ${Number(p.valor_unitario||0).toFixed(2)}</td><td>R$ ${Number(p.valor||0).toFixed(2)}</td>
+        <td>${p.km_atual} km</td><td>${p.km_proxima||'-'} km</td>
+        <td><button class="btn-small" onclick="deleteItem('pneus', '${p.id}')">Deletar</button></td></tr>`).join('');
 }
  
 function loadOleos() {
@@ -925,7 +1097,8 @@ function loadOleos() {
         const kmFaltando = o.km_proxima - (o.km_atual || 0);
         const cls = kmFaltando <= 5000 ? 'style="background:#fff3cd;"' : '';
         return `<tr ${cls}><td>${veiculoPlaca(o.veiculo_id)}</td><td>${new Date(o.data).toLocaleDateString('pt-BR')}</td>
-        <td>${o.tipo}</td><td>${o.km_atual} km</td><td>${o.km_proxima} km</td><td>${kmFaltando} km</td>
+        <td>${o.tipo}</td><td>${o.lugar||'-'}</td><td>${o.litragem||'-'}</td>
+        <td>${o.km_atual} km</td><td>${o.km_proxima} km</td>
         <td>R$ ${Number(o.valor).toFixed(2)}</td><td><button class="btn-small" onclick="deleteItem('oleos', '${o.id}')">Deletar</button></td></tr>`;
     }).join('');
 }
@@ -938,6 +1111,34 @@ function loadPreventivas() {
         <td>${p.descricao}</td><td>${p.km_atual} km</td><td>${p.km_proxima} km</td><td>${kmFaltando} km</td>
         <td>R$ ${Number(p.valor).toFixed(2)}</td><td><button class="btn-small" onclick="deleteItem('preventivas', '${p.id}')">Deletar</button></td></tr>`;
     }).join('');
+}
+ 
+function loadCorretivas() {
+    document.getElementById('corretivaTable').innerHTML = data.corretivas.map(c => `
+        <tr><td>${veiculoPlaca(c.veiculo_id)}</td><td>${new Date(c.data).toLocaleDateString('pt-BR')}</td>
+        <td>${c.descricao}</td><td>${c.oficina||'-'}</td><td>${c.km_atual||'-'}</td>
+        <td>R$ ${Number(c.valor).toFixed(2)}</td><td><button class="btn-small" onclick="deleteItem('corretivas', '${c.id}')">Deletar</button></td></tr>`).join('');
+}
+ 
+function loadBomba() {
+    const nivel = nivelBomba();
+    const alerta = nivel.atual <= currentEmpresa.bomba_alerta_minimo;
+    document.getElementById('bombaNivelValor').textContent = `${nivel.atual.toFixed(0)} L`;
+    document.getElementById('bombaNivelValor').className = 'bomba-nivel' + (alerta ? ' alerta' : '');
+    document.getElementById('bombaAlertaTexto').style.display = alerta ? 'block' : 'none';
+    const pct = nivel.totalCarregado > 0 ? Math.max(0, Math.min(100, (nivel.atual / nivel.totalCarregado) * 100)) : 0;
+    const fill = document.getElementById('bombaBarraFill');
+    fill.style.width = pct + '%';
+    fill.className = 'bomba-barra-fill' + (alerta ? ' alerta' : '');
+    document.getElementById('bombaTotalCarregado').textContent = `${nivel.totalCarregado.toFixed(0)} L`;
+    document.getElementById('bombaTotalDispensado').textContent = `${nivel.totalDispensado.toFixed(0)} L`;
+    document.getElementById('bombaGastoTotal').textContent = `R$ ${nivel.gastoTotal.toFixed(2)}`;
+    document.getElementById('nivelBombaDash').textContent = nivel.atual.toFixed(0);
+ 
+    document.getElementById('bombaCargasTable').innerHTML = data.bomba_cargas.map(c => `
+        <tr><td>${new Date(c.data).toLocaleDateString('pt-BR')}</td><td>${Number(c.litros).toFixed(0)} L</td>
+        <td>R$ ${Number(c.valor_total).toFixed(2)}</td><td>${c.fornecedor||'-'}</td>
+        <td><button class="btn-small" onclick="deleteItem('bomba_cargas', '${c.id}')">Deletar</button></td></tr>`).join('');
 }
  
 function loadMultas() {
@@ -1022,7 +1223,11 @@ function filtrarTurismo() {
     document.getElementById('turismoTable').innerHTML = filtrado.map(v => `
         <tr><td>${new Date(v.data).toLocaleDateString('pt-BR')}</td><td>${v.local_saida}</td><td>${v.local_chegada}</td>
         <td>${motoristaNome(v.motorista_id)}</td><td>${data.clientes.find(c=>c.id===v.cliente_id)?.nome || 'N/A'}</td>
-        <td>${veiculoPlaca(v.veiculo_id)}</td><td>R$ ${Number(v.valor_viagem).toFixed(2)}</td><td>R$ ${Number(v.valor_motorista).toFixed(2)}</td>
+        <td>${veiculoPlaca(v.veiculo_id)}</td><td>R$ ${Number(v.valor_viagem).toFixed(2)}</td>
+        <td>R$ ${Number(v.valor_pedagio||0).toFixed(2)}</td>
+        <td>${v.combustivel_litros ? Number(v.combustivel_litros).toFixed(1)+'L / ' : ''}R$ ${Number(v.combustivel_valor||0).toFixed(2)}</td>
+        <td>R$ ${Number(v.valor_diaria||0).toFixed(2)}</td>
+        <td>${v.outros_descricao ? v.outros_descricao+': R$ '+Number(v.outros_valor||0).toFixed(2) : '-'}</td>
         <td><span class="badge ${v.acerto_motorista_pago ? 'badge-pago' : 'badge-pendente'}">${v.acerto_motorista_pago ? 'Pago' : 'Pendente'}</span></td>
         <td><button class="btn-small" onclick="deleteItem('turismo_viagens', '${v.id}')">Deletar</button></td></tr>`).join('');
 }
@@ -1035,7 +1240,6 @@ function limparFiltrosTurismo() {
 }
  
 function loadDesempenho() {
-    // GERAL
     let htmlVeiculos = '<h3>🚗 Desempenho dos Veículos</h3>';
     htmlVeiculos += data.veiculos.map(v => {
         const rotasVeiculo = data.rotas.filter(r => r.veiculo_id === v.id);
@@ -1070,7 +1274,6 @@ function loadDesempenho() {
     }).join('');
     document.getElementById('desempenhoGeral').innerHTML = htmlVeiculos + htmlMotoristas;
  
-    // CONJUNTO (clicar no veículo mostra motoristas)
     document.getElementById('desempenhoConjunto').innerHTML = '<h3>🚗👨‍✈️ Clique em um veículo para ver a média de cada motorista nele</h3>' +
         data.veiculos.map(v => {
             const rotasVeiculo = data.rotas.filter(r => r.veiculo_id === v.id);
@@ -1081,18 +1284,14 @@ function loadDesempenho() {
                 const kmMedioRota = rotasDoMotorista.length > 0 ? (kmTotalM / rotasDoMotorista.length).toFixed(1) : 0;
                 return `<tr><td>${motoristaNome(mid)}</td><td>${rotasDoMotorista.length}</td><td>${kmTotalM} km</td><td>${kmMedioRota} km/rota</td></tr>`;
             }).join('') || '<tr><td colspan="4" style="color:#666;">Nenhuma rota registrada com esse veículo ainda.</td></tr>';
- 
             return `<div class="performance-card clickable-card" onclick="toggleSubList('sub_${v.id}')">
                 <h4>🚗 ${v.placa} - ${v.marca} ${v.modelo}</h4>
                 <p style="font-size:12px; color:#666;">${motoristasIds.length} motorista(s) já dirigiram este veículo — clique para ver</p>
-                <div id="sub_${v.id}" class="sub-list">
-                    <table><thead><tr><th>Motorista</th><th>Rotas</th><th>KM Total</th><th>KM Médio/Rota</th></tr></thead>
-                    <tbody>${linhasMotoristas}</tbody></table>
-                </div>
+                <div id="sub_${v.id}" class="sub-list"><table><thead><tr><th>Motorista</th><th>Rotas</th><th>KM Total</th><th>KM Médio/Rota</th></tr></thead>
+                <tbody>${linhasMotoristas}</tbody></table></div>
             </div>`;
         }).join('');
  
-    // ROTAS FIXAS
     document.getElementById('desempenhoRotaFixa').innerHTML = '<h3>📌 Desempenho das Rotas Fixas</h3>' +
         (data.rotas_fixas.map(rf => {
             const instancias = data.rotas.filter(r => r.rota_fixa_id === rf.id);
@@ -1142,6 +1341,7 @@ async function deleteItem(type, id) {
     updateDashboard();
     if (type === 'agenda') loadAgenda();
     if (type === 'turismo_viagens') filtrarTurismo();
+    if (type === 'bomba_cargas') loadBomba();
 }
  
 function updateDashboard() {
@@ -1151,6 +1351,7 @@ function updateDashboard() {
     document.getElementById('countClientes').textContent = data.clientes.length;
     document.getElementById('countMultas').textContent = data.multas.length;
     document.getElementById('countEstoqueBaixo').textContent = data.produtos.filter(p => Number(p.quantidade) <= Number(p.quantidade_minima)).length;
+    document.getElementById('nivelBombaDash').textContent = nivelBomba().atual.toFixed(0);
     document.getElementById('totalGasto').textContent = 'R$ ' + calcularTotalGasto().toFixed(2);
     carregarTopGastos();
 }
@@ -1158,9 +1359,10 @@ function updateDashboard() {
 function calcularTotalGasto() {
     let total = 0;
     total += data.abastecimentos.reduce((s,a) => s + Number(a.valor_total), 0);
-    total += data.pneus.reduce((s,p) => s + Number(p.valor), 0);
+    total += data.pneus.reduce((s,p) => s + Number(p.valor||0), 0);
     total += data.oleos.reduce((s,o) => s + Number(o.valor), 0);
     total += data.preventivas.reduce((s,p) => s + Number(p.valor), 0);
+    total += data.corretivas.reduce((s,c) => s + Number(c.valor), 0);
     total += data.multas.reduce((s,m) => s + Number(m.valor), 0);
     total += data.financeiro.filter(f => f.tipo === 'saida').reduce((s,f) => s + Number(f.valor), 0);
     return total;
@@ -1169,9 +1371,10 @@ function calcularTotalGasto() {
 function carregarTopGastos() {
     const gastos = [];
     data.abastecimentos.forEach(a => gastos.push({ descricao: `Abastecimento - ${veiculoPlaca(a.veiculo_id)}`, valor: Number(a.valor_total), data: a.data, tipo: 'Abastecimento' }));
-    data.pneus.forEach(p => gastos.push({ descricao: `Pneu - ${veiculoPlaca(p.veiculo_id)}`, valor: Number(p.valor), data: p.data, tipo: 'Pneu' }));
+    data.pneus.forEach(p => gastos.push({ descricao: `Pneu - ${veiculoPlaca(p.veiculo_id)}`, valor: Number(p.valor||0), data: p.data, tipo: 'Pneu' }));
     data.oleos.forEach(o => gastos.push({ descricao: `Óleo - ${veiculoPlaca(o.veiculo_id)}`, valor: Number(o.valor), data: o.data, tipo: 'Óleo' }));
     data.preventivas.forEach(p => gastos.push({ descricao: `Preventiva - ${veiculoPlaca(p.veiculo_id)}`, valor: Number(p.valor), data: p.data, tipo: 'Preventiva' }));
+    data.corretivas.forEach(c => gastos.push({ descricao: `Corretiva - ${veiculoPlaca(c.veiculo_id)}`, valor: Number(c.valor), data: c.data, tipo: 'Corretiva' }));
     data.multas.forEach(m => gastos.push({ descricao: `Multa - ${veiculoPlaca(m.veiculo_id)}`, valor: Number(m.valor), data: m.data, tipo: 'Multa' }));
     gastos.sort((a,b) => b.valor - a.valor);
     document.getElementById('topGastosList').innerHTML = gastos.slice(0,10).map(g => `
@@ -1181,23 +1384,24 @@ function carregarTopGastos() {
  
 function criarGraficos() {
     const totalAbastecimento = data.abastecimentos.reduce((s,a) => s + Number(a.valor_total), 0);
-    const totalPneus = data.pneus.reduce((s,p) => s + Number(p.valor), 0);
+    const totalPneus = data.pneus.reduce((s,p) => s + Number(p.valor||0), 0);
     const totalOleos = data.oleos.reduce((s,o) => s + Number(o.valor), 0);
     const totalPreventiva = data.preventivas.reduce((s,p) => s + Number(p.valor), 0);
+    const totalCorretiva = data.corretivas.reduce((s,c) => s + Number(c.valor), 0);
     const totalMultas = data.multas.reduce((s,m) => s + Number(m.valor), 0);
  
     if (chartGastos) chartGastos.destroy();
     chartGastos = new Chart(document.getElementById('chartGastos').getContext('2d'), {
-        type: 'line', data: { labels: ['Abastecimentos','Pneus','Óleos','Preventivas','Multas'],
-            datasets: [{ label: 'Gastos por Categoria', data: [totalAbastecimento,totalPneus,totalOleos,totalPreventiva,totalMultas],
+        type: 'line', data: { labels: ['Abastecimentos','Pneus','Óleos','Preventivas','Corretivas','Multas'],
+            datasets: [{ label: 'Gastos por Categoria', data: [totalAbastecimento,totalPneus,totalOleos,totalPreventiva,totalCorretiva,totalMultas],
                 borderColor: '#0066cc', backgroundColor: 'rgba(0,102,204,0.1)', borderWidth: 2, fill: true, tension: 0.4 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
     });
  
     if (chartCategorias) chartCategorias.destroy();
     chartCategorias = new Chart(document.getElementById('chartCategorias').getContext('2d'), {
-        type: 'doughnut', data: { labels: ['Abastecimentos','Pneus','Óleos','Preventivas','Multas'],
-            datasets: [{ data: [totalAbastecimento,totalPneus,totalOleos,totalPreventiva,totalMultas], backgroundColor: ['#0066cc','#00a3e0','#4caf50','#ffc107','#ff6b6b'] }] },
+        type: 'doughnut', data: { labels: ['Abastecimentos','Pneus','Óleos','Preventivas','Corretivas','Multas'],
+            datasets: [{ data: [totalAbastecimento,totalPneus,totalOleos,totalPreventiva,totalCorretiva,totalMultas], backgroundColor: ['#0066cc','#00a3e0','#4caf50','#ffc107','#ff9800','#ff6b6b'] }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
     });
 }
@@ -1306,8 +1510,8 @@ function calcularValorTotal() {
 async function loadData() {
     const empresaId = currentEmpresa.id;
     const tabelas = ['motoristas','funcionarios','veiculos','clientes','abastecimentos','pneus','oleos',
-                      'preventivas','multas','bancos','financeiro','rotas','produtos','estoque_movimentacoes',
-                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias'];
+                      'preventivas','corretivas','multas','bancos','financeiro','rotas','produtos','estoque_movimentacoes',
+                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas'];
  
     const resultados = await Promise.all(tabelas.map(t => sb.from(t).select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false })));
     resultados.forEach((res, i) => {
@@ -1316,9 +1520,10 @@ async function loadData() {
     });
  
     loadMotoristas(); loadFuncionarios(); loadVeiculos(); loadClientes();
-    loadAbastecimentos(); loadPneus(); loadOleos(); loadPreventivas(); loadMultas();
+    loadAbastecimentos(); loadPneus(); loadOleos(); loadPreventivas(); loadCorretivas(); loadMultas();
     loadBancos(); loadFinanceiro(); loadRotas();
     loadProdutos(); loadMovimentacoes();
+    loadBomba();
     preencherFiltroClientesTurismo(); filtrarTurismo();
     preencherFiltroRotas(); gerarRelatorioRotas();
     preencherFiltroMotivo();

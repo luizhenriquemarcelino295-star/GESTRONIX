@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -14,9 +15,6 @@
         .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
         .estoque-baixo { background: #fdecea !important; }
         .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-        .badge-ativo { background: #d4edda; color: #155724; }
-        .badge-demitido { background: #f8d7da; color: #721c24; }
-        .badge-experiencia { background: #fff3cd; color: #856404; }
         .badge-pago { background: #d4edda; color: #155724; }
         .badge-pendente { background: #f8d7da; color: #721c24; }
         .sim-result { background: #e3f2fd; padding: 20px; border-radius: 8px; margin-top: 15px; }
@@ -26,6 +24,12 @@
         .sub-list { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ddd; display: none; }
         .sub-list.open { display: block; }
         .sub-list table { margin-top: 5px; }
+        .bomba-card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; }
+        .bomba-nivel { font-size: 42px; font-weight: bold; color: #0066cc; }
+        .bomba-nivel.alerta { color: #ff6b6b; }
+        .bomba-barra { width: 100%; height: 24px; background: #eee; border-radius: 12px; overflow: hidden; margin: 15px 0; }
+        .bomba-barra-fill { height: 100%; background: linear-gradient(90deg, #0066cc, #00a3e0); transition: width 0.3s; }
+        .bomba-barra-fill.alerta { background: linear-gradient(90deg, #ff6b6b, #ff5252); }
     </style>
 </head>
 <body>
@@ -33,10 +37,7 @@
         <div class="header">
             <div class="logo-section">
                 <div class="logo">G</div>
-                <div class="logo-text">
-                    <h1>Gestronix</h1>
-                    <p>Gestão que conecta. Resultados que movem.</p>
-                </div>
+                <div class="logo-text"><h1>Gestronix</h1><p>Gestão que conecta. Resultados que movem.</p></div>
             </div>
             <div class="user-info">
                 <span id="userEmail">Usuário</span>
@@ -77,6 +78,7 @@
                         <div class="card"><h3>Total Gasto</h3><div class="number" id="totalGasto">R$ 0</div></div>
                         <div class="card"><h3>Multas</h3><div class="number" id="countMultas">0</div></div>
                         <div class="card"><h3>Produtos em Baixa</h3><div class="number" id="countEstoqueBaixo">0</div></div>
+                        <div class="card"><h3>Bomba (litros)</h3><div class="number" id="nivelBombaDash">0</div></div>
                     </div>
                     <div class="chart-container"><canvas id="chartGastos"></canvas></div>
                     <div class="chart-container"><canvas id="chartCategorias"></canvas></div>
@@ -91,7 +93,7 @@
                         <button class="btn-excel" onclick="exportarExcel('motoristas')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th><th>Val. CNH</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th><th>Val. CNH</th><th>Salário</th><th>Ações</th></tr></thead>
                         <tbody id="motoristasTable"></tbody>
                     </table>
                 </div>
@@ -107,15 +109,20 @@
                         <button class="tab active" onclick="switchTab('funcAtivos')">✅ Ativos</button>
                         <button class="tab" onclick="switchTab('funcDemitidos')">❌ Demitidos</button>
                         <button class="tab" onclick="switchTab('funcExperiencia')">⏳ Contrato de Experiência</button>
+                        <button class="tab" onclick="switchTab('funcMotoristas')">👨‍✈️ Motoristas</button>
                     </div>
                     <div id="funcAtivos" class="tab-content active">
-                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Admissão</th><th>Ações</th></tr></thead><tbody id="funcAtivosTable"></tbody></table>
+                        <table><thead><tr><th>Nome</th><th>Função</th><th>CPF</th><th>Telefone</th><th>Admissão</th><th>Salário</th><th>Ações</th></tr></thead><tbody id="funcAtivosTable"></tbody></table>
                     </div>
                     <div id="funcDemitidos" class="tab-content">
-                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Admissão</th><th>Demissão</th><th>Ações</th></tr></thead><tbody id="funcDemitidosTable"></tbody></table>
+                        <table><thead><tr><th>Nome</th><th>Função</th><th>CPF</th><th>Admissão</th><th>Demissão</th><th>Ações</th></tr></thead><tbody id="funcDemitidosTable"></tbody></table>
                     </div>
                     <div id="funcExperiencia" class="tab-content">
-                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Início Experiência</th><th>Fim Experiência</th><th>Ações</th></tr></thead><tbody id="funcExperienciaTable"></tbody></table>
+                        <table><thead><tr><th>Nome</th><th>Função</th><th>CPF</th><th>Início Experiência</th><th>Fim Experiência</th><th>Ações</th></tr></thead><tbody id="funcExperienciaTable"></tbody></table>
+                    </div>
+                    <div id="funcMotoristas" class="tab-content">
+                        <p style="color:#666; font-size:13px; margin-bottom:10px;"></p>
+                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Salário</th><th>Val. CNH</th></tr></thead><tbody id="funcMotoristasTable"></tbody></table>
                     </div>
                 </div>
  
@@ -127,7 +134,7 @@
                         <button class="btn-excel" onclick="exportarExcel('veiculos')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>KM Atual</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>KM Atual</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
                         <tbody id="veiculosTable"></tbody>
                     </table>
                 </div>
@@ -140,7 +147,7 @@
                         <button class="btn-excel" onclick="exportarExcel('clientes')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead><tr><th>Nome</th><th>CPF/CNPJ</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Nome</th><th>CPF/CNPJ</th><th>Telefone</th><th>Endereço</th><th>Cidade/UF</th><th>CEP</th><th>Nascimento</th><th>Ações</th></tr></thead>
                         <tbody id="clientesTable"></tbody>
                     </table>
                 </div>
@@ -153,37 +160,43 @@
                         <button class="tab" onclick="switchTab('pneus')">🛞 Pneus</button>
                         <button class="tab" onclick="switchTab('oleos')">🛢️ Óleos</button>
                         <button class="tab" onclick="switchTab('preventiva')">🔧 Preventiva</button>
+                        <button class="tab" onclick="switchTab('corretiva')">🛠️ Corretiva</button>
+                        <button class="tab" onclick="switchTab('bomba')">⛽📊 Bomba de Combustível</button>
                     </div>
+ 
                     <div id="abastecimentos" class="tab-content active">
                         <div class="btn-row">
                             <button onclick="openAddModal('abastecimento')">+ Adicionar Abastecimento</button>
                             <button class="btn-excel" onclick="exportarExcel('abastecimentos')">📥 Exportar Excel</button>
                         </div>
                         <table>
-                            <thead><tr><th>Veículo</th><th>Data</th><th>KM</th><th>Litros</th><th>Valor/L</th><th>Valor Total</th><th>KM/L</th><th>Ações</th></tr></thead>
+                            <thead><tr><th>Veículo</th><th>Fonte</th><th>Data</th><th>KM</th><th>Litros</th><th>Valor/L</th><th>Valor Total</th><th>KM/L</th><th>Ações</th></tr></thead>
                             <tbody id="abastecimentosTable"></tbody>
                         </table>
                     </div>
+ 
                     <div id="pneus" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('pneu')">+ Adicionar Pneu</button>
                             <button class="btn-excel" onclick="exportarExcel('pneus')">📥 Exportar Excel</button>
                         </div>
                         <table>
-                            <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>KM Atual</th><th>KM Próxima</th><th>KM Faltando</th><th>Valor</th><th>Ações</th></tr></thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>Oficina</th><th>Qtd</th><th>Valor Unit.</th><th>Valor Total</th><th>KM da Troca</th><th>KM Próxima</th><th>Ações</th></tr></thead>
                             <tbody id="neusTable"></tbody>
                         </table>
                     </div>
+ 
                     <div id="oleos" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('oleo')">+ Adicionar Óleo</button>
                             <button class="btn-excel" onclick="exportarExcel('oleos')">📥 Exportar Excel</button>
                         </div>
                         <table>
-                            <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>KM Atual</th><th>KM Próxima</th><th>KM Faltando</th><th>Valor</th><th>Ações</th></tr></thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>Lugar</th><th>Litragem</th><th>KM da Troca</th><th>KM Próxima</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="oleosTable"></tbody>
                         </table>
                     </div>
+ 
                     <div id="preventiva" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('preventiva')">+ Adicionar Manutenção Preventiva</button>
@@ -192,6 +205,40 @@
                         <table>
                             <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>KM Atual</th><th>KM Próxima</th><th>KM Faltando</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="preventivaTable"></tbody>
+                        </table>
+                    </div>
+ 
+                    <div id="corretiva" class="tab-content">
+                        <div class="btn-row">
+                            <button onclick="openAddModal('corretiva')">+ Adicionar Manutenção Corretiva</button>
+                            <button class="btn-excel" onclick="exportarExcel('corretivas')">📥 Exportar Excel</button>
+                        </div>
+                        <table>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>Oficina</th><th>KM Atual</th><th>Valor</th><th>Ações</th></tr></thead>
+                            <tbody id="corretivaTable"></tbody>
+                        </table>
+                    </div>
+ 
+                    <div id="bomba" class="tab-content">
+                        <div class="bomba-card">
+                            <p style="color:#666;">Nível atual da bomba</p>
+                            <div class="bomba-nivel" id="bombaNivelValor">0 L</div>
+                            <div class="bomba-barra"><div class="bomba-barra-fill" id="bombaBarraFill" style="width:0%;"></div></div>
+                            <p id="bombaAlertaTexto" style="color:#ff6b6b; font-weight:600; display:none;">⚠️ Nível abaixo do mínimo configurado!</p>
+                            <div class="performance-stats" style="margin-top:15px;">
+                                <div class="stat"><div class="stat-value" id="bombaTotalCarregado">0 L</div><div class="stat-label">Total Já Carregado</div></div>
+                                <div class="stat"><div class="stat-value" id="bombaTotalDispensado">0 L</div><div class="stat-label">Total Dispensado</div></div>
+                                <div class="stat"><div class="stat-value" id="bombaGastoTotal">R$ 0</div><div class="stat-label">Gasto Total nas Cargas</div></div>
+                            </div>
+                        </div>
+                        <div class="btn-row">
+                            <button onclick="openAddModal('cargaBomba')">+ Registrar Carga na Bomba</button>
+                            <button onclick="openAddModal('alertaBomba')">⚙️ Configurar Alerta Mínimo</button>
+                            <button class="btn-excel" onclick="exportarExcel('bomba_cargas')">📥 Exportar Excel</button>
+                        </div>
+                        <table>
+                            <thead><tr><th>Data</th><th>Litros</th><th>Valor Total</th><th>Fornecedor</th><th>Ações</th></tr></thead>
+                            <tbody id="bombaCargasTable"></tbody>
                         </table>
                     </div>
                 </div>
@@ -253,7 +300,7 @@
                         <button onclick="limparFiltrosTurismo()">Limpar Filtros</button>
                     </div>
                     <table>
-                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>Valor Viagem</th><th>Valor Motorista</th><th>Acerto</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>Valor Viagem</th><th>Pedágio</th><th>Combustível</th><th>Diária Motorista</th><th>Outros</th><th>Acerto</th><th>Ações</th></tr></thead>
                         <tbody id="turismoTable"></tbody>
                     </table>
                 </div>
@@ -374,4 +421,3 @@
     <script src="script.js"></script>
 </body>
 </html>
- 
