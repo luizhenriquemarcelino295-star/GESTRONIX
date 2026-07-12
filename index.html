@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -45,11 +44,10 @@
                 <button onclick="logout()">Sair</button>
             </div>
         </div>
- 
+
         <div class="main-content">
             <div class="sidebar">
                 <div class="menu-item active" onclick="showPage('dashboard')">📊 Dashboard</div>
-                <div class="menu-item" onclick="showPage('motoristas')">👨‍✈️ Motoristas</div>
                 <div class="menu-item" onclick="showPage('funcionarios')">👔 Funcionários</div>
                 <div class="menu-item" onclick="showPage('veiculos')">🚗 Veículos</div>
                 <div class="menu-item" onclick="showPage('clientes')">👥 Clientes</div>
@@ -65,7 +63,7 @@
                 <div class="menu-item" onclick="showPage('aniversarios')">🎂 Aniversários</div>
                 <div class="menu-item" onclick="showPage('relatorios')">📋 Relatórios</div>
             </div>
- 
+
             <div class="content">
                 <!-- DASHBOARD -->
                 <div id="dashboard" class="page active">
@@ -84,20 +82,7 @@
                     <div class="chart-container"><canvas id="chartCategorias"></canvas></div>
                     <div class="top-gastos"><h3>🔴 Top 10 Maiores Gastos</h3><div id="topGastosList"></div></div>
                 </div>
- 
-                <!-- MOTORISTAS -->
-                <div id="motoristas" class="page">
-                    <h2>👨‍✈️ Motoristas</h2>
-                    <div class="btn-row">
-                        <button onclick="openAddModal('motorista')">+ Adicionar Motorista</button>
-                        <button class="btn-excel" onclick="exportarExcel('motoristas')">📥 Exportar Excel</button>
-                    </div>
-                    <table>
-                        <thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th><th>Val. CNH</th><th>Salário</th><th>Ações</th></tr></thead>
-                        <tbody id="motoristasTable"></tbody>
-                    </table>
-                </div>
- 
+
                 <!-- FUNCIONÁRIOS -->
                 <div id="funcionarios" class="page">
                     <h2>👔 Funcionários</h2>
@@ -121,11 +106,14 @@
                         <table><thead><tr><th>Nome</th><th>Função</th><th>CPF</th><th>Início Experiência</th><th>Fim Experiência</th><th>Ações</th></tr></thead><tbody id="funcExperienciaTable"></tbody></table>
                     </div>
                     <div id="funcMotoristas" class="tab-content">
-                        <p style="color:#666; font-size:13px; margin-bottom:10px;"></p>
-                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Salário</th><th>Val. CNH</th></tr></thead><tbody id="funcMotoristasTable"></tbody></table>
+                        <div class="btn-row">
+                            <button onclick="openAddModal('motorista')">+ Adicionar Motorista</button>
+                            <button class="btn-excel" onclick="exportarExcel('motoristas')">📥 Exportar Excel</button>
+                        </div>
+                        <table><thead><tr><th>Nome</th><th>CPF</th><th>Telefone</th><th>Endereço</th><th>Nascimento</th><th>Val. CNH</th><th>Salário</th><th>Ações</th></tr></thead><tbody id="funcMotoristasTable"></tbody></table>
                     </div>
                 </div>
- 
+
                 <!-- VEÍCULOS -->
                 <div id="veiculos" class="page">
                     <h2>🚗 Veículos</h2>
@@ -138,7 +126,7 @@
                         <tbody id="veiculosTable"></tbody>
                     </table>
                 </div>
- 
+
                 <!-- CLIENTES -->
                 <div id="clientes" class="page">
                     <h2>👥 Clientes</h2>
@@ -151,7 +139,7 @@
                         <tbody id="clientesTable"></tbody>
                     </table>
                 </div>
- 
+
                 <!-- MANUTENÇÕES -->
                 <div id="manutencoes" class="page">
                     <h2>🔧 Manutenções</h2>
@@ -163,7 +151,7 @@
                         <button class="tab" onclick="switchTab('corretiva')">🛠️ Corretiva</button>
                         <button class="tab" onclick="switchTab('bomba')">⛽📊 Bomba de Combustível</button>
                     </div>
- 
+
                     <div id="abastecimentos" class="tab-content active">
                         <div class="btn-row">
                             <button onclick="openAddModal('abastecimento')">+ Adicionar Abastecimento</button>
@@ -174,29 +162,29 @@
                             <tbody id="abastecimentosTable"></tbody>
                         </table>
                     </div>
- 
+
                     <div id="pneus" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('pneu')">+ Adicionar Pneu</button>
                             <button class="btn-excel" onclick="exportarExcel('pneus')">📥 Exportar Excel</button>
                         </div>
                         <table>
-                            <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>Oficina</th><th>Qtd</th><th>Valor Unit.</th><th>Valor Total</th><th>KM da Troca</th><th>KM Próxima</th><th>Ações</th></tr></thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>Oficina</th><th>Qtd</th><th>Valor Unit.</th><th>Valor Total</th><th>KM da Troca</th><th>KM Atual (Veículo)</th><th>KM Próxima Troca</th><th>Ações</th></tr></thead>
                             <tbody id="neusTable"></tbody>
                         </table>
                     </div>
- 
+
                     <div id="oleos" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('oleo')">+ Adicionar Óleo</button>
                             <button class="btn-excel" onclick="exportarExcel('oleos')">📥 Exportar Excel</button>
                         </div>
                         <table>
-                            <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>Lugar</th><th>Litragem</th><th>KM da Troca</th><th>KM Próxima</th><th>Valor</th><th>Ações</th></tr></thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>Lugar</th><th>Litragem</th><th>KM da Troca</th><th>KM Atual (Veículo)</th><th>KM Próxima Troca</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="oleosTable"></tbody>
                         </table>
                     </div>
- 
+
                     <div id="preventiva" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('preventiva')">+ Adicionar Manutenção Preventiva</button>
@@ -207,18 +195,18 @@
                             <tbody id="preventivaTable"></tbody>
                         </table>
                     </div>
- 
+
                     <div id="corretiva" class="tab-content">
                         <div class="btn-row">
                             <button onclick="openAddModal('corretiva')">+ Adicionar Manutenção Corretiva</button>
                             <button class="btn-excel" onclick="exportarExcel('corretivas')">📥 Exportar Excel</button>
                         </div>
                         <table>
-                            <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>Oficina</th><th>KM Atual</th><th>Valor</th><th>Ações</th></tr></thead>
+                            <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>Oficina</th><th>KM da Troca</th><th>KM Atual (Veículo)</th><th>KM Próxima Troca</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="corretivaTable"></tbody>
                         </table>
                     </div>
- 
+
                     <div id="bomba" class="tab-content">
                         <div class="bomba-card">
                             <p style="color:#666;">Nível atual da bomba</p>
@@ -242,7 +230,7 @@
                         </table>
                     </div>
                 </div>
- 
+
                 <!-- MULTAS -->
                 <div id="multas" class="page">
                     <h2>🚨 Multas</h2>
@@ -255,7 +243,7 @@
                         <tbody id="multasTable"></tbody>
                     </table>
                 </div>
- 
+
                 <!-- ESTOQUE -->
                 <div id="estoque" class="page">
                     <h2>📦 Estoque</h2>
@@ -284,7 +272,7 @@
                         </table>
                     </div>
                 </div>
- 
+
                 <!-- TURISMO -->
                 <div id="turismo" class="page">
                     <h2>🧳 Turismo</h2>
@@ -304,7 +292,7 @@
                         <tbody id="turismoTable"></tbody>
                     </table>
                 </div>
- 
+
                 <!-- AGENDA -->
                 <div id="agenda" class="page">
                     <h2>📅 Agenda</h2>
@@ -314,7 +302,7 @@
                     </div>
                     <div id="agendaContent"></div>
                 </div>
- 
+
                 <!-- BANCOS -->
                 <div id="bancos" class="page">
                     <h2>🏦 Bancos</h2>
@@ -327,7 +315,7 @@
                         <tbody id="bancosTable"></tbody>
                     </table>
                 </div>
- 
+
                 <!-- FINANCEIRO -->
                 <div id="financeiro" class="page">
                     <h2>💰 Financeiro</h2>
@@ -347,7 +335,7 @@
                         <tbody id="financeiroTable"></tbody>
                     </table>
                 </div>
- 
+
                 <!-- ROTAS -->
                 <div id="rotas" class="page">
                     <h2>🗺️ Rotas</h2>
@@ -361,7 +349,7 @@
                         <tbody id="rotasTable"></tbody>
                     </table>
                 </div>
- 
+
                 <!-- DESEMPENHO -->
                 <div id="desempenho" class="page">
                     <h2>📈 Desempenho</h2>
@@ -374,13 +362,13 @@
                     <div id="desempenhoConjunto" class="tab-content"></div>
                     <div id="desempenhoRotaFixa" class="tab-content"></div>
                 </div>
- 
+
                 <!-- ANIVERSÁRIOS -->
                 <div id="aniversarios" class="page">
                     <h2>🎂 Aniversários</h2>
                     <div id="aniversariosContent"></div>
                 </div>
- 
+
                 <!-- RELATÓRIOS -->
                 <div id="relatorios" class="page">
                     <h2>📋 Relatórios</h2>
@@ -407,7 +395,7 @@
             </div>
         </div>
     </div>
- 
+
     <div id="modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -417,7 +405,7 @@
             <div id="modalBody"></div>
         </div>
     </div>
- 
+
     <script src="script.js"></script>
 </body>
 </html>
