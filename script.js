@@ -5,6 +5,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let currentEmpresa = null;
+let currentUserRole = 'admin';
 let chartGastos = null, chartCategorias = null, chartRelatorio = null;
 let editContext = null; // { type: 'motorista', id: '...' } quando editando, null quando adicionando
 let data = {
@@ -12,7 +13,7 @@ let data = {
     abastecimentos: [], pneus: [], oleos: [], preventivas: [], corretivas: [], multas: [],
     bancos: [], financeiro: [], rotas: [],
     produtos: [], estoque_movimentacoes: [], agenda: [], turismo_viagens: [],
-    rotas_fixas: [], financeiro_categorias: [], bomba_cargas: [],
+    rotas_fixas: [], financeiro_categorias: [], bomba_cargas: [], contas_pagar: [],
 };
 
 // ==== AUTENTICAÇÃO ====
@@ -22,16 +23,27 @@ async function checkAuth() {
     currentUser = session.user;
 
     const { data: perfil, error } = await sb
-        .from('perfis').select('nome, empresa_id, empresas(id, nome, bomba_alerta_minimo)')
+        .from('perfis').select('nome, empresa_id, role, empresas(id, nome, bomba_alerta_minimo)')
         .eq('id', currentUser.id).single();
 
     if (error || !perfil) { showLoginPage(); return; }
 
     currentEmpresa = { id: perfil.empresa_id, nome: perfil.empresas.nome, bomba_alerta_minimo: perfil.empresas.bomba_alerta_minimo };
+    currentUserRole = perfil.role || 'admin';
     document.getElementById('userEmail').textContent = currentUser.email;
     document.getElementById('empresaNome').textContent = `(${currentEmpresa.nome})`;
+    aplicarPermissoes();
     await loadData();
     updateDashboard();
+}
+
+function aplicarPermissoes() {
+    if (currentUserRole === 'admin') return;
+    // operador não vê Financeiro, Bancos nem Relatórios no menu
+    ['financeiro', 'bancos', 'relatorios'].forEach(page => {
+        const item = [...document.querySelectorAll('.menu-item')].find(el => el.getAttribute('onclick') === `showPage('${page}')`);
+        if (item) item.style.display = 'none';
+    });
 }
 
 function showLoginPage() {
@@ -112,7 +124,7 @@ function showPage(page) {
     if (page === 'aniversarios') loadAniversarios();
     else if (page === 'dashboard') setTimeout(criarGraficos, 100);
     else if (page === 'desempenho') loadDesempenho();
-    else if (page === 'relatorios') setTimeout(gerarRelatorio, 100);
+    else if (page === 'relatorios') setTimeout(() => { gerarRelatorio(); gerarRelatorioTurismo(); }, 100);
     else if (page === 'agenda') loadAgenda();
 }
 
@@ -139,7 +151,7 @@ const EXPORT_CONFIG = {
     ]},
     veiculos: { titulo: 'Veiculos', campos: [
         ['placa','Placa'], ['marca','Marca'], ['modelo','Modelo'], ['ano','Ano'], ['chassi','Chassi'], ['renavam','Renavam'],
-        ['km_atual','KM Atual'], ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
+        ['km_atual','KM Atual'], ['csv_validade','Validade CSV'], ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
     ]},
     clientes: { titulo: 'Clientes', campos: [
         ['nome','Nome'], ['cpf_cnpj','CPF/CNPJ'], ['telefone','Telefone'], ['rua','Rua'], ['numero','Número'],
@@ -197,12 +209,17 @@ const EXPORT_CONFIG = {
         [item => (data.clientes.find(c => c.id === item.cliente_id)?.nome || 'N/A'), 'Cliente'],
         [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['km','KM'],
         ['valor_viagem','Valor Viagem'], ['valor_pedagio','Pedágio'], ['combustivel_litros','Litros Combustível'],
-        ['combustivel_valor','Valor Combustível'], ['valor_diaria','Diária Motorista'],
+        ['combustivel_valor','Valor Combustível'], ['valor_diaria','Diária Motorista'], ['adiantamento','Adiantamento'],
         ['outros_descricao','Outros (descrição)'], ['outros_valor','Outros (valor)'],
+        [item => (item.km ? (custoPorKmVeiculo(item.veiculo_id) * Number(item.km)).toFixed(2) : ''), 'Gasto do Veículo'],
         [item => (item.acerto_motorista_pago ? 'Pago' : 'Pendente'), 'Acerto Motorista']
     ]},
     bomba_cargas: { titulo: 'Bomba_Combustivel', campos: [
         ['data','Data'], ['litros','Litros'], ['valor_total','Valor Total'], ['fornecedor','Fornecedor']
+    ]},
+    contas_pagar: { titulo: 'Contas_a_Pagar', campos: [
+        ['fornecedor','Fornecedor'], ['descricao','Descrição'], ['valor','Valor'], ['data_vencimento','Vencimento'],
+        ['status','Status'], ['data_pagamento','Data Pagamento']
     ]},
 };
 
@@ -246,15 +263,16 @@ function custoPorKmVeiculo(veiculoId) {
     gastos += data.multas.filter(m => m.veiculo_id === veiculoId).reduce((s,m) => s + Number(m.valor||0), 0);
     return kmTotal > 0 ? gastos / kmTotal : 0;
 }
-function gastoRotaInstancia(r) {
+function gastoRotaDetalhado(r) {
     const dataRota = new Date(r.data_inicio).toDateString();
-    let gasto = 0;
-    data.abastecimentos.forEach(a => { if (a.veiculo_id===r.veiculo_id && new Date(a.data).toDateString()===dataRota) gasto += Number(a.valor_total); });
-    data.pneus.forEach(p => { if (p.veiculo_id===r.veiculo_id && new Date(p.data).toDateString()===dataRota) gasto += Number(p.valor||0); });
-    data.oleos.forEach(o => { if (o.veiculo_id===r.veiculo_id && new Date(o.data).toDateString()===dataRota) gasto += Number(o.valor||0); });
-    data.preventivas.forEach(p => { if (p.veiculo_id===r.veiculo_id && new Date(p.data).toDateString()===dataRota) gasto += Number(p.valor||0); });
-    data.corretivas.forEach(c => { if (c.veiculo_id===r.veiculo_id && new Date(c.data).toDateString()===dataRota) gasto += Number(c.valor||0); });
-    return gasto;
+    let combustivel = 0, manutencao = 0, multas = 0;
+    data.abastecimentos.forEach(a => { if (a.veiculo_id===r.veiculo_id && new Date(a.data).toDateString()===dataRota) combustivel += Number(a.valor_total); });
+    data.pneus.forEach(p => { if (p.veiculo_id===r.veiculo_id && new Date(p.data).toDateString()===dataRota) manutencao += Number(p.valor||0); });
+    data.oleos.forEach(o => { if (o.veiculo_id===r.veiculo_id && new Date(o.data).toDateString()===dataRota) manutencao += Number(o.valor||0); });
+    data.preventivas.forEach(p => { if (p.veiculo_id===r.veiculo_id && new Date(p.data).toDateString()===dataRota) manutencao += Number(p.valor||0); });
+    data.corretivas.forEach(c => { if (c.veiculo_id===r.veiculo_id && new Date(c.data).toDateString()===dataRota) manutencao += Number(c.valor||0); });
+    data.multas.forEach(m => { if (m.veiculo_id===r.veiculo_id && new Date(m.data).toDateString()===dataRota) multas += Number(m.valor||0); });
+    return { combustivel, manutencao, multas, total: combustivel + manutencao + multas };
 }
 function alertErro(error) { alert('Erro: ' + (error?.message || 'algo deu errado. Tente novamente.')); }
 
@@ -358,10 +376,13 @@ function openAddModal(type, item = null) {
             <div class="form-group"><label>KM Atual</label><input type="number" id="veiculoKmAtual" value="${v(item,'km_atual',0)}"></div>
             <p style="font-size:12px; color:#666; margin: 5px 0 10px;">Os campos abaixo são opcionais:</p>
             <div class="form-row">
+                <div class="form-group"><label>Validade do CSV</label><input type="date" id="veiculoCsvValidade" value="${v(item,'csv_validade')}"></div>
                 <div class="form-group"><label>Validade do Tacógrafo</label><input type="date" id="veiculoTacografoValidade" value="${v(item,'tacografo_validade')}"></div>
-                <div class="form-group"><label>Validade da Apólice</label><input type="date" id="veiculoApoliceValidade" value="${v(item,'apolice_validade')}"></div>
             </div>
-            <div class="form-group"><label>Ano do CRLV</label><input type="number" id="veiculoCrlvAno" value="${v(item,'crlv_ano')}" placeholder="2026"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Validade da Apólice</label><input type="date" id="veiculoApoliceValidade" value="${v(item,'apolice_validade')}"></div>
+                <div class="form-group"><label>Ano do CRLV</label><input type="number" id="veiculoCrlvAno" value="${v(item,'crlv_ano')}" placeholder="2026"></div>
+            </div>
             <button onclick="addVeiculo()">${acaoLabel}</button>
         `;
     } else if (type === 'cliente') {
@@ -508,6 +529,17 @@ function openAddModal(type, item = null) {
             <div class="form-group"><label>Alertar quando o nível estiver abaixo de (litros)</label><input type="number" id="alertaBombaValor" value="${currentEmpresa.bomba_alerta_minimo}"></div>
             <button onclick="salvarAlertaBomba()">Salvar</button>
         `;
+    } else if (type === 'contaPagar') {
+        modalTitle.textContent = item ? 'Editar Conta a Pagar' : 'Adicionar Conta a Pagar';
+        html = `
+            <div class="form-group"><label>Fornecedor</label><input type="text" id="contaPagarFornecedor" value="${v(item,'fornecedor')}"></div>
+            <div class="form-group"><label>Descrição</label><input type="text" id="contaPagarDescricao" value="${v(item,'descricao')}"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Valor</label><input type="number" id="contaPagarValor" step="0.01" value="${v(item,'valor')}"></div>
+                <div class="form-group"><label>Data de Vencimento</label><input type="date" id="contaPagarVencimento" value="${v(item,'data_vencimento')}"></div>
+            </div>
+            <button onclick="addContaPagar()">${acaoLabel}</button>
+        `;
     } else if (type === 'multa') {
         modalTitle.textContent = item ? 'Editar Multa' : 'Adicionar Multa';
         const opts = data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
@@ -543,7 +575,7 @@ function openAddModal(type, item = null) {
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Tipo</label><select id="financeiroTipo"><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
-                <div class="form-group"><label>Motivo</label><select id="financeiroMotivo">${catOpts}<option value="__nova__">+ Nova categoria...</option></select></div>
+                <div class="form-group"><label>Motivo</label><select id="financeiroMotivo" onchange="tratarNovaCategoria()">${catOpts}<option value="__nova__">+ Nova categoria...</option></select></div>
             </div>
             <div class="form-group"><label>Descrição</label><textarea id="financeiroDescricao">${v(item,'descricao')}</textarea></div>
             <div class="form-group"><label>Valor</label><input type="number" id="financeiroValor" step="0.01" value="${v(item,'valor')}"></div>
@@ -663,9 +695,10 @@ function openAddModal(type, item = null) {
                 <div class="form-group"><label>Horário</label><input type="time" id="viagemHorario" value="${v(item,'horario')}"></div>
             </div>
             <div class="form-group"><label>Valor da Viagem</label><input type="number" id="viagemValor" step="0.01" value="${v(item,'valor_viagem')}"></div>
+            <div class="form-group"><label>Valor do Pedágio</label><input type="number" id="viagemPedagio" step="0.01" value="${v(item,'valor_pedagio')}"></div>
             <div class="form-row">
-                <div class="form-group"><label>Valor do Pedágio</label><input type="number" id="viagemPedagio" step="0.01" value="${v(item,'valor_pedagio')}"></div>
                 <div class="form-group"><label>Valor da Diária do Motorista</label><input type="number" id="viagemDiaria" step="0.01" value="${v(item,'valor_diaria')}"></div>
+                <div class="form-group"><label>Adiantamento já dado ao Motorista</label><input type="number" id="viagemAdiantamento" step="0.01" value="${v(item,'adiantamento',0)}"></div>
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Litros de Combustível</label><input type="number" id="viagemCombustivelLitros" step="0.01" value="${v(item,'combustivel_litros')}"></div>
@@ -707,6 +740,22 @@ function atualizarCamposFuncionario() {
     const status = document.getElementById('funcionarioStatus').value;
     document.getElementById('grupoDemissao').style.display = status === 'demitido' ? 'block' : 'none';
     document.getElementById('grupoExperiencia').style.display = status === 'experiencia' ? 'flex' : 'none';
+}
+
+async function tratarNovaCategoria() {
+    const sel = document.getElementById('financeiroMotivo');
+    if (sel.value !== '__nova__') return;
+    const novaCategoria = prompt('Digite o nome da nova categoria:');
+    if (!novaCategoria) { sel.value = data.financeiro_categorias[0]?.nome || ''; return; }
+    const { error } = await sb.from('financeiro_categorias').insert({ empresa_id: currentEmpresa.id, nome: novaCategoria });
+    if (error) { alertErro(error); sel.value = data.financeiro_categorias[0]?.nome || ''; return; }
+    data.financeiro_categorias.push({ nome: novaCategoria });
+    const opt = document.createElement('option');
+    opt.value = novaCategoria;
+    opt.textContent = novaCategoria;
+    sel.insertBefore(opt, sel.querySelector('option[value="__nova__"]'));
+    sel.value = novaCategoria;
+    preencherFiltroMotivo();
 }
 
 function autoPreencherKm(prefixo) {
@@ -796,11 +845,12 @@ async function addVeiculo() {
     const chassi = document.getElementById('veiculoChassi').value;
     const renavam = document.getElementById('veiculoRenavam').value;
     const km_atual = parseFloat(document.getElementById('veiculoKmAtual').value) || 0;
+    const csv_validade = document.getElementById('veiculoCsvValidade').value || null;
     const tacografo_validade = document.getElementById('veiculoTacografoValidade').value || null;
     const apolice_validade = document.getElementById('veiculoApoliceValidade').value || null;
     const crlv_ano = document.getElementById('veiculoCrlvAno').value || null;
     if (!placa || !marca || !modelo || !ano) { alert('Preencha placa, marca, modelo e ano'); return; }
-    const payload = { placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual, tacografo_validade, apolice_validade, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null };
+    const payload = { placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual, csv_validade, tacografo_validade, apolice_validade, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null };
     const { error } = isEdit
         ? await sb.from('veiculos').update(payload).eq('id', editContext.id)
         : await sb.from('veiculos').insert({ empresa_id: currentEmpresa.id, ...payload });
@@ -960,6 +1010,42 @@ async function salvarAlertaBomba() {
     if (error) { alertErro(error); return; }
     currentEmpresa.bomba_alerta_minimo = valor;
     closeModal(); loadBomba();
+}
+
+async function addContaPagar() {
+    const isEdit = editContext && editContext.type === 'contaPagar';
+    const fornecedor = document.getElementById('contaPagarFornecedor').value;
+    const descricao = document.getElementById('contaPagarDescricao').value;
+    const valor = parseFloat(document.getElementById('contaPagarValor').value);
+    const data_vencimento = document.getElementById('contaPagarVencimento').value;
+    if (!fornecedor || !valor || !data_vencimento) { alert('Preencha fornecedor, valor e data de vencimento'); return; }
+    const payload = { fornecedor, descricao, valor, data_vencimento };
+    const { error } = isEdit
+        ? await sb.from('contas_pagar').update(payload).eq('id', editContext.id)
+        : await sb.from('contas_pagar').insert({ empresa_id: currentEmpresa.id, ...payload, status: 'pendente' });
+    if (error) { alertErro(error); return; }
+    closeModal(); await loadData(); updateDashboard();
+}
+
+async function marcarContaPaga(id) {
+    const conta = data.contas_pagar.find(c => c.id === id);
+    if (!conta) return;
+    if (data.bancos.length === 0) { alert('Cadastre um banco primeiro pra poder marcar como pago.'); return; }
+    const nomesBancos = data.bancos.map((b,i) => `${i+1} - ${b.nome}`).join('\n');
+    const escolha = prompt(`Marcar "${conta.fornecedor}" (R$ ${Number(conta.valor).toFixed(2)}) como pago. De qual banco vai sair?\n${nomesBancos}`);
+    const idx = parseInt(escolha) - 1;
+    if (!data.bancos[idx]) return;
+    const banco = data.bancos[idx];
+
+    const categoria = data.financeiro_categorias.find(c => c.nome === 'Outro')?.nome || data.financeiro_categorias[0]?.nome || 'Outro';
+    await sb.from('financeiro').insert({
+        empresa_id: currentEmpresa.id, banco_id: banco.id, data: new Date().toISOString().slice(0,10), tipo: 'saida',
+        motivo: categoria, descricao: `Conta paga - ${conta.fornecedor}${conta.descricao ? ' - ' + conta.descricao : ''}`, valor: Number(conta.valor)
+    });
+    await sb.from('bancos').update({ saldo: Number(banco.saldo) - Number(conta.valor) }).eq('id', banco.id);
+    await sb.from('contas_pagar').update({ status: 'pago', data_pagamento: new Date().toISOString().slice(0,10), banco_id: banco.id }).eq('id', id);
+
+    await loadData(); updateDashboard();
 }
 
 async function addMulta() {
@@ -1140,6 +1226,7 @@ async function addViagem() {
     const valor_viagem = parseFloat(document.getElementById('viagemValor').value) || 0;
     const valor_pedagio = parseFloat(document.getElementById('viagemPedagio').value) || 0;
     const valor_diaria = parseFloat(document.getElementById('viagemDiaria').value) || 0;
+    const adiantamento = parseFloat(document.getElementById('viagemAdiantamento').value) || 0;
     const combustivel_litros = parseFloat(document.getElementById('viagemCombustivelLitros').value) || 0;
     const combustivel_valor = parseFloat(document.getElementById('viagemCombustivelValor').value) || 0;
     const outros_descricao = document.getElementById('viagemOutrosDescricao').value;
@@ -1148,7 +1235,7 @@ async function addViagem() {
     if (!local_saida || !local_chegada || !data_viagem) { alert('Preencha ao menos saída, chegada e data'); return; }
     const payload = {
         local_saida, local_chegada, motorista_id, cliente_id, veiculo_id, km, data: data_viagem, horario,
-        valor_viagem, valor_pedagio, valor_diaria, combustivel_litros, combustivel_valor, outros_descricao, outros_valor,
+        valor_viagem, valor_pedagio, valor_diaria, adiantamento, combustivel_litros, combustivel_valor, outros_descricao, outros_valor,
         valor_motorista: valor_diaria, acerto_motorista_pago,
         acerto_data: acerto_motorista_pago ? new Date().toISOString().slice(0,10) : null
     };
@@ -1156,6 +1243,25 @@ async function addViagem() {
         ? await sb.from('turismo_viagens').update(payload).eq('id', editContext.id)
         : await sb.from('turismo_viagens').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
+
+    // se marcou (ou já estava) como pago e sobra valor líquido (diária - adiantamento), oferece lançar no financeiro
+    const jaEraPago = isEdit ? data.turismo_viagens.find(vg => vg.id === editContext.id)?.acerto_motorista_pago : false;
+    const valorLiquido = valor_diaria - adiantamento;
+    if (acerto_motorista_pago && !jaEraPago && valorLiquido > 0 && data.bancos.length > 0) {
+        const nomesBancos = data.bancos.map((b,i) => `${i+1} - ${b.nome}`).join('\n');
+        const escolha = prompt(`Lançar R$ ${valorLiquido.toFixed(2)} de comissão do motorista no Financeiro (diária R$ ${valor_diaria.toFixed(2)} - adiantamento já pago R$ ${adiantamento.toFixed(2)})?\nDigite o número do banco pra confirmar, ou cancele pra não lançar:\n${nomesBancos}`);
+        const idx = parseInt(escolha) - 1;
+        if (data.bancos[idx]) {
+            const banco = data.bancos[idx];
+            const categoriaComissao = data.financeiro_categorias.find(c => c.nome === 'Salário')?.nome || data.financeiro_categorias[0]?.nome || 'Outro';
+            await sb.from('financeiro').insert({
+                empresa_id: currentEmpresa.id, banco_id: banco.id, data: data_viagem, tipo: 'saida',
+                motivo: categoriaComissao, descricao: `Comissão/diária (líquido) - ${motoristaNome(motorista_id)} - viagem ${local_saida} → ${local_chegada}`, valor: valorLiquido
+            });
+            await sb.from('bancos').update({ saldo: Number(banco.saldo) - valorLiquido }).eq('id', banco.id);
+        }
+    }
+
     closeModal(); await loadData(); filtrarTurismo();
 }
 
@@ -1191,10 +1297,12 @@ function loadVeiculos() {
     document.getElementById('veiculosTable').innerHTML = data.veiculos.map(vv => `
         <tr><td>${vv.placa}</td><td>${vv.marca}</td><td>${vv.modelo}</td><td>${vv.ano}</td><td>${vv.chassi||'-'}</td><td>${vv.renavam||'-'}</td>
         <td>${Number(vv.km_atual||0).toLocaleString('pt-BR')} km</td>
+        <td>${vv.csv_validade ? new Date(vv.csv_validade).toLocaleDateString('pt-BR') : '-'}</td>
         <td>${vv.tacografo_validade ? new Date(vv.tacografo_validade).toLocaleDateString('pt-BR') : '-'}</td>
         <td>${vv.apolice_validade ? new Date(vv.apolice_validade).toLocaleDateString('pt-BR') : '-'}</td>
         <td>${vv.crlv_ano || '-'}</td>
         <td>
+            <button class="btn-small" style="background:#764ba2;" onclick="verHistoricoVeiculo('${vv.id}')">Histórico</button>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('veiculos','${vv.id}','veiculo')">Editar</button>
             <button class="btn-small" onclick="deleteItem('veiculos', '${vv.id}')">Deletar</button>
         </td></tr>`).join('');
@@ -1274,6 +1382,26 @@ function loadCorretivas() {
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('corretivas','${c.id}','corretiva')">Editar</button>
             <button class="btn-small" onclick="deleteItem('corretivas', '${c.id}')">Deletar</button>
         </td></tr>`).join('');
+}
+
+function loadContasPagar() {
+    const hoje = new Date(); hoje.setHours(0,0,0,0);
+    document.getElementById('contasPagarTable').innerHTML = data.contas_pagar.map(c => {
+        const vencimento = new Date(c.data_vencimento);
+        const atrasada = c.status === 'pendente' && vencimento < hoje;
+        const badge = c.status === 'pago' ? '<span class="badge badge-pago">Pago</span>'
+            : atrasada ? '<span class="badge badge-pendente">Atrasado</span>'
+            : '<span class="badge" style="background:#fff3cd; color:#856404;">Pendente</span>';
+        return `<tr ${atrasada ? 'class="estoque-baixo"' : ''}>
+            <td>${c.fornecedor}</td><td>${c.descricao||'-'}</td><td>${vencimento.toLocaleDateString('pt-BR')}</td>
+            <td>R$ ${Number(c.valor).toFixed(2)}</td><td>${badge}</td>
+            <td>${c.data_pagamento ? new Date(c.data_pagamento).toLocaleDateString('pt-BR') : '-'}</td>
+            <td>
+                ${c.status === 'pendente' ? `<button class="btn-small" style="background:#4caf50;" onclick="marcarContaPaga('${c.id}')">Marcar Pago</button>` : ''}
+                <button class="btn-small" style="background:#0066cc;" onclick="editarItem('contas_pagar','${c.id}','contaPagar')">Editar</button>
+                <button class="btn-small" onclick="deleteItem('contas_pagar', '${c.id}')">Deletar</button>
+            </td></tr>`;
+    }).join('');
 }
 
 function loadBomba() {
@@ -1398,19 +1526,23 @@ function filtrarTurismo() {
     if (dataInicio) filtrado = filtrado.filter(vv => new Date(vv.data) >= new Date(dataInicio));
     if (dataFim) filtrado = filtrado.filter(vv => new Date(vv.data) <= new Date(dataFim));
     if (clienteId) filtrado = filtrado.filter(vv => vv.cliente_id === clienteId);
-    document.getElementById('turismoTable').innerHTML = filtrado.map(vg => `
-        <tr><td>${new Date(vg.data).toLocaleDateString('pt-BR')}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
+    document.getElementById('turismoTable').innerHTML = filtrado.map(vg => {
+        const gastoVeiculo = vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0;
+        return `<tr><td>${new Date(vg.data).toLocaleDateString('pt-BR')}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
         <td>${motoristaNome(vg.motorista_id)}</td><td>${data.clientes.find(c=>c.id===vg.cliente_id)?.nome || 'N/A'}</td>
         <td>${veiculoPlaca(vg.veiculo_id)}</td><td>R$ ${Number(vg.valor_viagem).toFixed(2)}</td>
         <td>R$ ${Number(vg.valor_pedagio||0).toFixed(2)}</td>
         <td>${vg.combustivel_litros ? Number(vg.combustivel_litros).toFixed(1)+'L / ' : ''}R$ ${Number(vg.combustivel_valor||0).toFixed(2)}</td>
         <td>R$ ${Number(vg.valor_diaria||0).toFixed(2)}</td>
+        <td>R$ ${Number(vg.adiantamento||0).toFixed(2)}</td>
         <td>${vg.outros_descricao ? vg.outros_descricao+': R$ '+Number(vg.outros_valor||0).toFixed(2) : '-'}</td>
+        <td>${vg.km ? `R$ ${gastoVeiculo.toFixed(2)} <span style="font-size:11px; color:#666;">(${vg.km} km)</span>` : '-'}</td>
         <td><span class="badge ${vg.acerto_motorista_pago ? 'badge-pago' : 'badge-pendente'}">${vg.acerto_motorista_pago ? 'Pago' : 'Pendente'}</span></td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('turismo_viagens','${vg.id}','viagem')">Editar</button>
             <button class="btn-small" onclick="deleteItem('turismo_viagens', '${vg.id}')">Deletar</button>
-        </td></tr>`).join('');
+        </td></tr>`;
+    }).join('');
 }
 
 function limparFiltrosTurismo() {
@@ -1473,25 +1605,100 @@ function loadDesempenho() {
             </div>`;
         }).join('');
 
-    document.getElementById('desempenhoRotaFixa').innerHTML = '<h3>📌 Desempenho das Rotas Fixas</h3>' +
-        (data.rotas_fixas.map(rf => {
-            const instancias = data.rotas.filter(r => r.rota_fixa_id === rf.id);
-            const kmTotal = instancias.reduce((s,r) => s + kmPercorrido(r), 0);
-            const gastoTotal = instancias.reduce((s,r) => s + gastoRotaInstancia(r), 0);
-            const custoPorKm = kmTotal > 0 ? (gastoTotal / kmTotal).toFixed(2) : 0;
-            return `<div class="performance-card">
-                <h4>📌 ${rf.nome}</h4>
-                <p style="font-size:12px; color:#666;">${rf.local_saida || ''} → ${rf.local_chegada || ''}</p>
-                <div class="performance-stats">
-                    <div class="stat"><div class="stat-value">${instancias.length}</div><div class="stat-label">Vezes Realizada</div></div>
-                    <div class="stat"><div class="stat-value">${kmTotal}</div><div class="stat-label">KM Total</div></div>
-                    <div class="stat"><div class="stat-value">R$ ${gastoTotal.toFixed(2)}</div><div class="stat-label">Gasto Total</div></div>
-                    <div class="stat"><div class="stat-value">R$ ${custoPorKm}</div><div class="stat-label">Custo/KM</div></div>
-                </div></div>`;
-        }).join('') || '<p style="color:#666;">Nenhuma rota fixa cadastrada. Vá em Rotas → "Nova Rota Fixa" para criar.</p>');
+    document.getElementById('desempenhoRotaFixa').innerHTML = '<h3>📌 Desempenho das Rotas Fixas</h3>' + renderRotasFixasPerformance();
+}
+
+function renderRotasFixasPerformance() {
+    return data.rotas_fixas.map(rf => {
+        const instancias = data.rotas.filter(r => r.rota_fixa_id === rf.id);
+        const kmTotal = instancias.reduce((s,r) => s + kmPercorrido(r), 0);
+        const gastoTotal = instancias.reduce((s,r) => s + custoPorKmVeiculo(r.veiculo_id) * kmPercorrido(r), 0);
+        const custoPorKm = kmTotal > 0 ? (gastoTotal / kmTotal).toFixed(2) : 0;
+        return `<div class="performance-card">
+            <h4>📌 ${rf.nome}</h4>
+            <p style="font-size:12px; color:#666;">${rf.local_saida || ''} → ${rf.local_chegada || ''}</p>
+            <div class="performance-stats">
+                <div class="stat"><div class="stat-value">${instancias.length}</div><div class="stat-label">Vezes Realizada</div></div>
+                <div class="stat"><div class="stat-value">${kmTotal}</div><div class="stat-label">KM Total</div></div>
+                <div class="stat"><div class="stat-value">R$ ${gastoTotal.toFixed(2)}</div><div class="stat-label">Gasto Estimado (por média do veículo)</div></div>
+                <div class="stat"><div class="stat-value">R$ ${custoPorKm}</div><div class="stat-label">Custo/KM</div></div>
+            </div></div>`;
+    }).join('') || '<p style="color:#666;">Nenhuma rota fixa cadastrada. Vá em Rotas → "Nova Rota Fixa" para criar.</p>';
 }
 
 function toggleSubList(id) { document.getElementById(id).classList.toggle('open'); }
+
+function verHistoricoVeiculo(veiculoId) {
+    const vv = data.veiculos.find(x => x.id === veiculoId);
+    if (!vv) return;
+
+    const eventos = [];
+    data.rotas.filter(r => r.veiculo_id === veiculoId).forEach(r => eventos.push({ data: r.data_inicio, tipo: '🗺️ Rota', desc: `${r.local_saida} → ${r.destino} (${motoristaNome(r.motorista_id)}) — ${kmPercorrido(r)} km`, valor: null }));
+    data.abastecimentos.filter(a => a.veiculo_id === veiculoId).forEach(a => eventos.push({ data: a.data, tipo: '⛽ Abastecimento', desc: `${Number(a.litros).toFixed(1)}L (${a.fonte === 'bomba' ? 'bomba própria' : 'posto'})`, valor: Number(a.valor_total) }));
+    data.pneus.filter(p => p.veiculo_id === veiculoId).forEach(p => eventos.push({ data: p.data, tipo: '🛞 Pneu', desc: `${p.tipo||''} - ${p.oficina||''}`, valor: Number(p.valor||0) }));
+    data.oleos.filter(o => o.veiculo_id === veiculoId).forEach(o => eventos.push({ data: o.data, tipo: '🛢️ Óleo', desc: `${o.tipo||''} - ${o.lugar||''}`, valor: Number(o.valor||0) }));
+    data.preventivas.filter(p => p.veiculo_id === veiculoId).forEach(p => eventos.push({ data: p.data, tipo: '🔧 Preventiva', desc: p.descricao||'', valor: Number(p.valor||0) }));
+    data.corretivas.filter(c => c.veiculo_id === veiculoId).forEach(c => eventos.push({ data: c.data, tipo: '🛠️ Corretiva', desc: `${c.descricao||''} - ${c.oficina||''}`, valor: Number(c.valor||0) }));
+    data.multas.filter(m => m.veiculo_id === veiculoId).forEach(m => eventos.push({ data: m.data, tipo: '🚨 Multa', desc: m.descricao||'', valor: Number(m.valor||0) }));
+    data.turismo_viagens.filter(vg => vg.veiculo_id === veiculoId).forEach(vg => eventos.push({ data: vg.data, tipo: '🧳 Viagem', desc: `${vg.local_saida} → ${vg.local_chegada}`, valor: Number(vg.valor_viagem||0) }));
+
+    eventos.sort((a,b) => new Date(b.data) - new Date(a.data));
+    const gastoTotal = eventos.reduce((s,e) => s + (e.valor || 0), 0);
+
+    document.getElementById('modalTitle').textContent = `📜 Histórico - ${vv.placa} (${vv.marca} ${vv.modelo})`;
+    document.getElementById('modalBody').innerHTML = `
+        <p style="margin-bottom:10px; color:#666;">KM atual: <strong>${Number(vv.km_atual||0).toLocaleString('pt-BR')} km</strong> • Gasto total registrado: <strong>R$ ${gastoTotal.toFixed(2)}</strong> • ${eventos.length} eventos</p>
+        <div style="max-height:400px; overflow-y:auto;">
+            ${eventos.map(e => `
+                <div class="gasto-item">
+                    <div class="gasto-info"><h4>${e.tipo}</h4><p>${new Date(e.data).toLocaleDateString('pt-BR')} • ${e.desc}</p></div>
+                    ${e.valor != null ? `<div class="gasto-valor">R$ ${e.valor.toFixed(2)}</div>` : ''}
+                </div>`).join('') || '<p style="color:#666;">Nenhum evento registrado ainda pra esse veículo.</p>'}
+        </div>
+        <button onclick="closeModal()" style="margin-top:15px;">Fechar</button>
+    `;
+    document.getElementById('modal').classList.add('active');
+}
+
+function carregarAlertasDocumentos() {
+    const hoje = new Date();
+    const itens = [];
+    data.motoristas.forEach(m => { if (m.cnh_validade) itens.push({ nome: `CNH - ${m.nome}`, data: m.cnh_validade }); });
+    data.veiculos.forEach(vv => {
+        if (vv.csv_validade) itens.push({ nome: `CSV - ${vv.placa}`, data: vv.csv_validade });
+        if (vv.tacografo_validade) itens.push({ nome: `Tacógrafo - ${vv.placa}`, data: vv.tacografo_validade });
+        if (vv.apolice_validade) itens.push({ nome: `Apólice - ${vv.placa}`, data: vv.apolice_validade });
+    });
+    const comDias = itens.map(it => {
+        const dataVenc = new Date(it.data);
+        const dias = Math.ceil((dataVenc - hoje) / (1000*60*60*24));
+        return { ...it, dias };
+    }).filter(it => it.dias <= 30).sort((a,b) => a.dias - b.dias);
+
+    document.getElementById('alertasDocumentos').innerHTML = comDias.length === 0
+        ? '<p style="color:#666;">Nenhum documento vencendo nos próximos 30 dias. 👍</p>'
+        : comDias.map(it => `
+            <div class="gasto-item">
+                <div class="gasto-info"><h4>${it.nome}</h4><p>${new Date(it.data).toLocaleDateString('pt-BR')}</p></div>
+                <div class="gasto-valor" style="color:${it.dias < 0 ? '#ff6b6b' : '#ffc107'};">${it.dias < 0 ? `Vencido há ${Math.abs(it.dias)} dias` : `Em ${it.dias} dias`}</div>
+            </div>`).join('');
+}
+
+function carregarProximasManutencoes() {
+    const itens = [];
+    data.pneus.forEach(p => { if (p.km_proxima) itens.push({ tipo: 'Pneu', veiculo: veiculoPlaca(p.veiculo_id), kmFaltando: p.km_proxima - veiculoKmAtual(p.veiculo_id) }); });
+    data.oleos.forEach(o => { if (o.km_proxima) itens.push({ tipo: 'Óleo', veiculo: veiculoPlaca(o.veiculo_id), kmFaltando: o.km_proxima - veiculoKmAtual(o.veiculo_id) }); });
+    data.preventivas.forEach(p => { if (p.km_proxima) itens.push({ tipo: 'Preventiva', veiculo: veiculoPlaca(p.veiculo_id), kmFaltando: p.km_proxima - veiculoKmAtual(p.veiculo_id) }); });
+    itens.sort((a,b) => a.kmFaltando - b.kmFaltando);
+
+    document.getElementById('proximasManutencoes').innerHTML = itens.length === 0
+        ? '<p style="color:#666;">Nenhuma manutenção com KM de troca registrado ainda.</p>'
+        : itens.slice(0, 15).map(it => `
+            <div class="gasto-item">
+                <div class="gasto-info"><h4>${it.tipo} - ${it.veiculo}</h4></div>
+                <div class="gasto-valor" style="color:${it.kmFaltando <= 0 ? '#ff6b6b' : it.kmFaltando <= 2000 ? '#ffc107' : '#4caf50'};">${it.kmFaltando <= 0 ? `${Math.abs(it.kmFaltando)} km atrasado` : `Faltam ${it.kmFaltando} km`}</div>
+            </div>`).join('');
+}
 
 function loadAniversarios() {
     const hoje = new Date();
@@ -1516,6 +1723,21 @@ function loadAniversarios() {
 
 async function deleteItem(type, id) {
     if (!confirm('Tem certeza que deseja deletar?')) return;
+
+    // Se for um lançamento financeiro, reverte o efeito dele no saldo do banco antes de apagar
+    if (type === 'financeiro') {
+        const lancamento = data.financeiro.find(f => f.id === id);
+        if (lancamento && lancamento.banco_id) {
+            const banco = data.bancos.find(b => b.id === lancamento.banco_id);
+            if (banco) {
+                const saldoRevertido = lancamento.tipo === 'entrada'
+                    ? Number(banco.saldo) - Number(lancamento.valor)
+                    : Number(banco.saldo) + Number(lancamento.valor);
+                await sb.from('bancos').update({ saldo: saldoRevertido }).eq('id', banco.id);
+            }
+        }
+    }
+
     const { error } = await sb.from(type).delete().eq('id', id);
     if (error) { alertErro(error); return; }
     await loadData();
@@ -1532,9 +1754,13 @@ function updateDashboard() {
     document.getElementById('countClientes').textContent = data.clientes.length;
     document.getElementById('countMultas').textContent = data.multas.length;
     document.getElementById('countEstoqueBaixo').textContent = data.produtos.filter(p => Number(p.quantidade) <= Number(p.quantidade_minima)).length;
+    const em7dias = new Date(); em7dias.setDate(em7dias.getDate() + 7);
+    document.getElementById('countContasPagarVencendo').textContent = data.contas_pagar.filter(c => c.status === 'pendente' && new Date(c.data_vencimento) <= em7dias).length;
     document.getElementById('nivelBombaDash').textContent = nivelBomba().atual.toFixed(0);
     document.getElementById('totalGasto').textContent = 'R$ ' + calcularTotalGasto().toFixed(2);
     carregarTopGastos();
+    carregarAlertasDocumentos();
+    carregarProximasManutencoes();
 }
 
 function calcularTotalGasto() {
@@ -1665,15 +1891,53 @@ function gerarRelatorio() {
 }
 
 function gerarRelatorioRotas() {
+    document.getElementById('rotasFixasRelatorio').innerHTML = renderRotasFixasPerformance();
     const filtroRota = document.getElementById('filtroRotaRelatorio')?.value || '';
     let rotasFiltradas = data.rotas;
     if (filtroRota) rotasFiltradas = rotasFiltradas.filter(r => r.id === filtroRota);
     document.getElementById('rotasGastoTable').innerHTML = rotasFiltradas.map(r => {
-        const gastoRota = gastoRotaInstancia(r);
+        const g = gastoRotaDetalhado(r);
         const kmP = kmPercorrido(r);
-        const custoPorKm = kmP > 0 ? (gastoRota/kmP).toFixed(2) : 0;
-        return `<tr><td>${veiculoPlaca(r.veiculo_id)}</td><td>${motoristaNome(r.motorista_id)}</td><td>${r.local_saida}</td><td>${r.destino}</td>
-        <td>${new Date(r.data_inicio).toLocaleDateString('pt-BR')}</td><td>${kmP} km</td><td>R$ ${gastoRota.toFixed(2)}</td><td>R$ ${custoPorKm}/km</td></tr>`;
+        const custoPorKm = kmP > 0 ? (g.total/kmP).toFixed(2) : 0;
+        const rotaFixa = data.rotas_fixas.find(rf => rf.id === r.rota_fixa_id)?.nome || '-';
+        return `<tr><td>${veiculoPlaca(r.veiculo_id)}</td><td>${motoristaNome(r.motorista_id)}</td><td>${rotaFixa}</td><td>${r.local_saida}</td><td>${r.destino}</td>
+        <td>${new Date(r.data_inicio).toLocaleDateString('pt-BR')}</td><td>${tempoTotal(r)}</td><td>${kmP} km</td>
+        <td>R$ ${g.combustivel.toFixed(2)}</td><td>R$ ${g.manutencao.toFixed(2)}</td><td>R$ ${g.multas.toFixed(2)}</td>
+        <td><strong>R$ ${g.total.toFixed(2)}</strong></td><td>R$ ${custoPorKm}/km</td></tr>`;
+    }).join('');
+}
+
+function gerarRelatorioTurismo() {
+    const totalViagens = data.turismo_viagens.length;
+    const totalFaturado = data.turismo_viagens.reduce((s,vg) => s + Number(vg.valor_viagem||0), 0);
+    const totalPedagio = data.turismo_viagens.reduce((s,vg) => s + Number(vg.valor_pedagio||0), 0);
+    const totalCombustivel = data.turismo_viagens.reduce((s,vg) => s + Number(vg.combustivel_valor||0), 0);
+    const totalDiarias = data.turismo_viagens.reduce((s,vg) => s + Number(vg.valor_diaria||0), 0);
+    const totalOutros = data.turismo_viagens.reduce((s,vg) => s + Number(vg.outros_valor||0), 0);
+    const totalGastoVeiculo = data.turismo_viagens.reduce((s,vg) => s + (vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0), 0);
+    const totalCustos = totalPedagio + totalCombustivel + totalDiarias + totalOutros + totalGastoVeiculo;
+    const totalPendente = data.turismo_viagens.filter(vg => !vg.acerto_motorista_pago).length;
+
+    document.getElementById('resumoTurismoRelatorio').innerHTML = `
+        <div class="card"><h3>Viagens</h3><div class="number">${totalViagens}</div></div>
+        <div class="card"><h3>Faturado</h3><div class="number">R$ ${totalFaturado.toFixed(2)}</div></div>
+        <div class="card"><h3>Gasto do Veículo</h3><div class="number">R$ ${totalGastoVeiculo.toFixed(2)}</div></div>
+        <div class="card"><h3>Custos Totais</h3><div class="number">R$ ${totalCustos.toFixed(2)}</div></div>
+        <div class="card"><h3>Lucro Estimado</h3><div class="number">R$ ${(totalFaturado-totalCustos).toFixed(2)}</div></div>
+        <div class="card"><h3>Acertos Pendentes</h3><div class="number">${totalPendente}</div></div>
+    `;
+
+    document.getElementById('turismoRelatorioTable').innerHTML = data.turismo_viagens.map(vg => {
+        const gastoVeiculo = vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0;
+        const totalViagem = Number(vg.valor_pedagio||0) + Number(vg.combustivel_valor||0) + Number(vg.valor_diaria||0) + Number(vg.outros_valor||0) + gastoVeiculo;
+        return `<tr><td>${new Date(vg.data).toLocaleDateString('pt-BR')}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
+        <td>${motoristaNome(vg.motorista_id)}</td><td>${data.clientes.find(c=>c.id===vg.cliente_id)?.nome || 'N/A'}</td><td>${veiculoPlaca(vg.veiculo_id)}</td>
+        <td>${vg.km || '-'} km</td><td>R$ ${Number(vg.valor_viagem||0).toFixed(2)}</td><td>R$ ${Number(vg.valor_pedagio||0).toFixed(2)}</td>
+        <td>${vg.combustivel_litros ? Number(vg.combustivel_litros).toFixed(1)+'L / ' : ''}R$ ${Number(vg.combustivel_valor||0).toFixed(2)}</td>
+        <td>R$ ${Number(vg.valor_diaria||0).toFixed(2)}</td><td>${vg.outros_descricao ? vg.outros_descricao+': R$ '+Number(vg.outros_valor||0).toFixed(2) : '-'}</td>
+        <td>R$ ${gastoVeiculo.toFixed(2)}</td>
+        <td><strong>R$ ${totalViagem.toFixed(2)}</strong></td>
+        <td><span class="badge ${vg.acerto_motorista_pago ? 'badge-pago' : 'badge-pendente'}">${vg.acerto_motorista_pago ? 'Pago' : 'Pendente'}</span></td></tr>`;
     }).join('');
 }
 
@@ -1696,7 +1960,7 @@ async function loadData() {
     const empresaId = currentEmpresa.id;
     const tabelas = ['motoristas','funcionarios','veiculos','clientes','abastecimentos','pneus','oleos',
                       'preventivas','corretivas','multas','bancos','financeiro','rotas','produtos','estoque_movimentacoes',
-                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas'];
+                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas','contas_pagar'];
 
     const resultados = await Promise.all(tabelas.map(t => sb.from(t).select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false })));
     resultados.forEach((res, i) => {
@@ -1708,6 +1972,7 @@ async function loadData() {
     loadAbastecimentos(); loadPneus(); loadOleos(); loadPreventivas(); loadCorretivas(); loadMultas();
     loadBancos(); loadFinanceiro(); loadRotas();
     loadProdutos(); loadMovimentacoes();
+    loadContasPagar();
     loadBomba();
     preencherFiltroClientesTurismo(); filtrarTurismo();
     preencherFiltroRotas(); gerarRelatorioRotas();

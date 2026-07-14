@@ -48,20 +48,20 @@
         <div class="main-content">
             <div class="sidebar">
                 <div class="menu-item active" onclick="showPage('dashboard')">📊 Dashboard</div>
-                <div class="menu-item" onclick="showPage('funcionarios')">👔 Funcionários</div>
-                <div class="menu-item" onclick="showPage('veiculos')">🚗 Veículos</div>
+                <div class="menu-item" onclick="showPage('agenda')">📅 Agenda</div>
+                <div class="menu-item" onclick="showPage('rotas')">🗺️ Rotas</div>
+                <div class="menu-item" onclick="showPage('turismo')">🚌 Turismo</div>
                 <div class="menu-item" onclick="showPage('clientes')">👥 Clientes</div>
+                <div class="menu-item" onclick="showPage('veiculos')">🚐 Veículos</div>
+                <div class="menu-item" onclick="showPage('funcionarios')">👨‍✈️ Funcionários</div>
+                <div class="menu-item" onclick="showPage('financeiro')">💰 Financeiro</div>
+                <div class="menu-item" onclick="showPage('bancos')">🏦 Bancos</div>
+                <div class="menu-item" onclick="showPage('estoque')">📦 Estoque</div>
                 <div class="menu-item" onclick="showPage('manutencoes')">🔧 Manutenções</div>
                 <div class="menu-item" onclick="showPage('multas')">🚨 Multas</div>
-                <div class="menu-item" onclick="showPage('estoque')">📦 Estoque</div>
-                <div class="menu-item" onclick="showPage('turismo')">🧳 Turismo</div>
-                <div class="menu-item" onclick="showPage('agenda')">📅 Agenda</div>
-                <div class="menu-item" onclick="showPage('bancos')">🏦 Bancos</div>
-                <div class="menu-item" onclick="showPage('financeiro')">💰 Financeiro</div>
-                <div class="menu-item" onclick="showPage('rotas')">🗺️ Rotas</div>
                 <div class="menu-item" onclick="showPage('desempenho')">📈 Desempenho</div>
+                <div class="menu-item" onclick="showPage('relatorios')">📄 Relatórios</div>
                 <div class="menu-item" onclick="showPage('aniversarios')">🎂 Aniversários</div>
-                <div class="menu-item" onclick="showPage('relatorios')">📋 Relatórios</div>
             </div>
 
             <div class="content">
@@ -76,11 +76,14 @@
                         <div class="card"><h3>Total Gasto</h3><div class="number" id="totalGasto">R$ 0</div></div>
                         <div class="card"><h3>Multas</h3><div class="number" id="countMultas">0</div></div>
                         <div class="card"><h3>Produtos em Baixa</h3><div class="number" id="countEstoqueBaixo">0</div></div>
+                        <div class="card"><h3>Contas a Pagar (7 dias)</h3><div class="number" id="countContasPagarVencendo">0</div></div>
                         <div class="card"><h3>Bomba (litros)</h3><div class="number" id="nivelBombaDash">0</div></div>
                     </div>
                     <div class="chart-container"><canvas id="chartGastos"></canvas></div>
                     <div class="chart-container"><canvas id="chartCategorias"></canvas></div>
-                    <div class="top-gastos"><h3>🔴 Top 10 Maiores Gastos</h3><div id="topGastosList"></div></div>
+                    <div class="top-gastos"><h3>⚠️ Documentos Vencendo ou Vencidos</h3><div id="alertasDocumentos"></div></div>
+                    <div class="top-gastos" style="margin-top:20px;"><h3>🔧 Próximas Manutenções (por KM)</h3><div id="proximasManutencoes"></div></div>
+                    <div class="top-gastos" style="margin-top:20px;"><h3>🔴 Top 10 Maiores Gastos</h3><div id="topGastosList"></div></div>
                 </div>
 
                 <!-- FUNCIONÁRIOS -->
@@ -122,7 +125,7 @@
                         <button class="btn-excel" onclick="exportarExcel('veiculos')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>KM Atual</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>KM Atual</th><th>Val. CSV</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
                         <tbody id="veiculosTable"></tbody>
                     </table>
                 </div>
@@ -288,7 +291,7 @@
                         <button onclick="limparFiltrosTurismo()">Limpar Filtros</button>
                     </div>
                     <table>
-                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>Valor Viagem</th><th>Pedágio</th><th>Combustível</th><th>Diária Motorista</th><th>Outros</th><th>Acerto</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>Valor Viagem</th><th>Pedágio</th><th>Combustível</th><th>Diária Motorista</th><th>Adiantamento</th><th>Outros</th><th>Gasto do Veículo</th><th>Acerto</th><th>Ações</th></tr></thead>
                         <tbody id="turismoTable"></tbody>
                     </table>
                 </div>
@@ -319,21 +322,39 @@
                 <!-- FINANCEIRO -->
                 <div id="financeiro" class="page">
                     <h2>💰 Financeiro</h2>
-                    <div class="filters">
-                        <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroDataInicio" onchange="filtrarFinanceiro()"></div>
-                        <div class="filter-group"><label>Data Final</label><input type="date" id="filtroDataFim" onchange="filtrarFinanceiro()"></div>
-                        <div class="filter-group"><label>Tipo</label><select id="filtroTipo" onchange="filtrarFinanceiro()"><option value="">Todos</option><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
-                        <div class="filter-group"><label>Motivo</label><select id="filtroMotivo" onchange="filtrarFinanceiro()"><option value="">Todos</option></select></div>
-                        <button onclick="limparFiltros()">Limpar Filtros</button>
+                    <div class="tabs">
+                        <button class="tab active" onclick="switchTab('financeiroLancamentos')">💵 Lançamentos</button>
+                        <button class="tab" onclick="switchTab('financeiroContasPagar')">📆 Contas a Pagar</button>
                     </div>
-                    <div class="btn-row">
-                        <button onclick="openAddModal('financeiro')">+ Adicionar Lançamento</button>
-                        <button class="btn-excel" onclick="exportarExcel('financeiro')">📥 Exportar Excel</button>
+
+                    <div id="financeiroLancamentos" class="tab-content active">
+                        <div class="filters">
+                            <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroDataInicio" onchange="filtrarFinanceiro()"></div>
+                            <div class="filter-group"><label>Data Final</label><input type="date" id="filtroDataFim" onchange="filtrarFinanceiro()"></div>
+                            <div class="filter-group"><label>Tipo</label><select id="filtroTipo" onchange="filtrarFinanceiro()"><option value="">Todos</option><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
+                            <div class="filter-group"><label>Motivo</label><select id="filtroMotivo" onchange="filtrarFinanceiro()"><option value="">Todos</option></select></div>
+                            <button onclick="limparFiltros()">Limpar Filtros</button>
+                        </div>
+                        <div class="btn-row">
+                            <button onclick="openAddModal('financeiro')">+ Adicionar Lançamento</button>
+                            <button class="btn-excel" onclick="exportarExcel('financeiro')">📥 Exportar Excel</button>
+                        </div>
+                        <table>
+                            <thead><tr><th>Data</th><th>Banco</th><th>Tipo</th><th>Motivo</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead>
+                            <tbody id="financeiroTable"></tbody>
+                        </table>
                     </div>
-                    <table>
-                        <thead><tr><th>Data</th><th>Banco</th><th>Tipo</th><th>Motivo</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead>
-                        <tbody id="financeiroTable"></tbody>
-                    </table>
+
+                    <div id="financeiroContasPagar" class="tab-content">
+                        <div class="btn-row">
+                            <button onclick="openAddModal('contaPagar')">+ Adicionar Conta a Pagar</button>
+                            <button class="btn-excel" onclick="exportarExcel('contas_pagar')">📥 Exportar Excel</button>
+                        </div>
+                        <table>
+                            <thead><tr><th>Fornecedor</th><th>Descrição</th><th>Vencimento</th><th>Valor</th><th>Status</th><th>Data Pagamento</th><th>Ações</th></tr></thead>
+                            <tbody id="contasPagarTable"></tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <!-- ROTAS -->
@@ -383,13 +404,23 @@
                     </div>
                     <div class="top-gastos" id="resumoFinanceiro"></div>
                     <div class="chart-container"><canvas id="chartRelatorio"></canvas></div>
-                    <h3 style="margin-top: 30px;">Gastos por Rota</h3>
+                    <h3 style="margin-top: 30px;">📌 Desempenho das Rotas Fixas</h3>
+                    <div id="rotasFixasRelatorio"></div>
+
+                    <h3 style="margin-top: 30px;">Detalhamento de Rotas</h3>
                     <div class="filters">
                         <div class="filter-group"><label>Rota</label><select id="filtroRotaRelatorio" onchange="gerarRelatorioRotas()"></select></div>
                     </div>
                     <table>
-                        <thead><tr><th>Veículo</th><th>Motorista</th><th>Saída</th><th>Destino</th><th>Data</th><th>KM</th><th>Gasto</th><th>Custo/KM</th></tr></thead>
+                        <thead><tr><th>Veículo</th><th>Motorista</th><th>Rota Fixa</th><th>Saída</th><th>Destino</th><th>Data</th><th>Tempo</th><th>KM</th><th>Combustível</th><th>Manutenção</th><th>Multas</th><th>Gasto Total</th><th>Custo/KM</th></tr></thead>
                         <tbody id="rotasGastoTable"></tbody>
+                    </table>
+
+                    <h3 style="margin-top: 30px;">Detalhamento de Turismo</h3>
+                    <div id="resumoTurismoRelatorio" class="dashboard-cards" style="margin-bottom:20px;"></div>
+                    <table>
+                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>KM</th><th>Valor Viagem</th><th>Pedágio</th><th>Combustível</th><th>Diária</th><th>Outros</th><th>Gasto do Veículo</th><th>Total</th><th>Acerto</th></tr></thead>
+                        <tbody id="turismoRelatorioTable"></tbody>
                     </table>
                 </div>
             </div>
