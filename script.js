@@ -13,7 +13,7 @@ let data = {
     abastecimentos: [], pneus: [], oleos: [], preventivas: [], corretivas: [], multas: [],
     bancos: [], financeiro: [], rotas: [],
     produtos: [], estoque_movimentacoes: [], agenda: [], turismo_viagens: [],
-    rotas_fixas: [], financeiro_categorias: [], bomba_cargas: [], contas_pagar: [],
+    rotas_fixas: [], financeiro_categorias: [], bomba_cargas: [], contas_pagar: [], contas_receber: [],
 };
 
 // ==== AUTENTICAÇÃO ====
@@ -135,6 +135,7 @@ function switchTab(tab) {
     parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     event.target.classList.add('active');
     if (tab === 'bomba') loadBomba();
+    if (tab === 'mediasManutencao') gerarRelatorioMedias();
 }
 
 // ==== EXPORTAR EXCEL ====
@@ -221,6 +222,11 @@ const EXPORT_CONFIG = {
         ['fornecedor','Fornecedor'], ['descricao','Descrição'], ['valor','Valor'], ['data_vencimento','Vencimento'],
         ['status','Status'], ['data_pagamento','Data Pagamento']
     ]},
+    contas_receber: { titulo: 'Contas_a_Receber', campos: [
+        [item => (data.clientes.find(c => c.id === item.cliente_id)?.nome || '-'), 'Cliente'],
+        ['descricao','Descrição'], ['valor','Valor'], ['data_vencimento','Vencimento'],
+        ['status','Status'], ['data_recebimento','Data Recebimento']
+    ]},
 };
 
 function exportarExcel(tipo) {
@@ -238,6 +244,21 @@ function exportarExcel(tipo) {
 }
 
 // ==== HELPERS ====
+function formatarData(dataStr) {
+    if (!dataStr) return '';
+    // evita o bug de fuso horário: trata "AAAA-MM-DD" como texto puro, não como Date UTC
+    const soData = String(dataStr).slice(0, 10);
+    const [ano, mes, dia] = soData.split('-');
+    if (!ano || !mes || !dia) return '';
+    return `${dia}/${mes}/${ano}`;
+}
+function parseDataLocal(dataStr) {
+    if (!dataStr) return null;
+    const soData = String(dataStr).slice(0, 10);
+    const [ano, mes, dia] = soData.split('-').map(Number);
+    if (!ano || !mes || !dia) return null;
+    return new Date(ano, mes - 1, dia);
+}
 function veiculoPlaca(id) { return data.veiculos.find(v => v.id === id)?.placa || 'N/A'; }
 function veiculoKmAtual(id) { return Number(data.veiculos.find(v => v.id === id)?.km_atual || 0); }
 function motoristaNome(id) { return data.motoristas.find(m => m.id === id)?.nome || 'N/A'; }
@@ -276,12 +297,16 @@ function gastoRotaDetalhado(r) {
 }
 function alertErro(error) { alert('Erro: ' + (error?.message || 'algo deu errado. Tente novamente.')); }
 
-async function atualizarKmVeiculo(veiculoId, novoKm) {
-    if (!veiculoId || !novoKm) return;
-    const veiculo = data.veiculos.find(v => v.id === veiculoId);
-    if (veiculo && novoKm > Number(veiculo.km_atual || 0)) {
-        await sb.from('veiculos').update({ km_atual: novoKm }).eq('id', veiculoId);
-    }
+async function recalcularKmVeiculo(veiculoId) {
+    if (!veiculoId) return;
+    let maiorKm = 0;
+    data.rotas.forEach(r => { if (r.veiculo_id === veiculoId && r.km_fim > maiorKm) maiorKm = Number(r.km_fim); });
+    data.abastecimentos.forEach(a => { if (a.veiculo_id === veiculoId && a.km > maiorKm) maiorKm = Number(a.km); });
+    data.pneus.forEach(p => { if (p.veiculo_id === veiculoId && p.km_atual > maiorKm) maiorKm = Number(p.km_atual); });
+    data.oleos.forEach(o => { if (o.veiculo_id === veiculoId && o.km_atual > maiorKm) maiorKm = Number(o.km_atual); });
+    data.preventivas.forEach(p => { if (p.veiculo_id === veiculoId && p.km_atual > maiorKm) maiorKm = Number(p.km_atual); });
+    data.corretivas.forEach(c => { if (c.veiculo_id === veiculoId && c.km_atual > maiorKm) maiorKm = Number(c.km_atual); });
+    await sb.from('veiculos').update({ km_atual: maiorKm }).eq('id', veiculoId);
 }
 
 function nivelBomba() {
@@ -540,6 +565,19 @@ function openAddModal(type, item = null) {
             </div>
             <button onclick="addContaPagar()">${acaoLabel}</button>
         `;
+    } else if (type === 'contaReceber') {
+        modalTitle.textContent = item ? 'Editar Conta a Receber' : 'Adicionar Conta a Receber';
+        const clientesOptions = data.clientes.map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
+        html = `
+            <div class="form-group"><label>Cliente</label><select id="contaReceberCliente">${clientesOptions}</select></div>
+            <div class="form-group"><label>Descrição</label><input type="text" id="contaReceberDescricao" value="${v(item,'descricao')}"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Valor</label><input type="number" id="contaReceberValor" step="0.01" value="${v(item,'valor')}"></div>
+                <div class="form-group"><label>Data de Vencimento</label><input type="date" id="contaReceberVencimento" value="${v(item,'data_vencimento')}"></div>
+            </div>
+            <button onclick="addContaReceber()">${acaoLabel}</button>
+        `;
+        posRender = () => { document.getElementById('contaReceberCliente').value = v(item,'cliente_id'); };
     } else if (type === 'multa') {
         modalTitle.textContent = item ? 'Editar Multa' : 'Adicionar Multa';
         const opts = data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
@@ -906,8 +944,7 @@ async function addAbastecimento() {
         ? await sb.from('abastecimentos').update(payload).eq('id', editContext.id)
         : await sb.from('abastecimentos').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
-    await atualizarKmVeiculo(veiculo_id, km);
-    closeModal(); await loadData(); updateDashboard();
+    closeModal(); await loadData(); await recalcularKmVeiculo(veiculo_id); await loadData(); updateDashboard();
 }
 
 async function addPneu() {
@@ -927,8 +964,7 @@ async function addPneu() {
         ? await sb.from('pneus').update(payload).eq('id', editContext.id)
         : await sb.from('pneus').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
-    await atualizarKmVeiculo(veiculo_id, km_atual);
-    closeModal(); await loadData(); updateDashboard();
+    closeModal(); await loadData(); await recalcularKmVeiculo(veiculo_id); await loadData(); updateDashboard();
 }
 
 async function addOleo() {
@@ -947,8 +983,7 @@ async function addOleo() {
         ? await sb.from('oleos').update(payload).eq('id', editContext.id)
         : await sb.from('oleos').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
-    await atualizarKmVeiculo(veiculo_id, km_atual);
-    closeModal(); await loadData(); updateDashboard();
+    closeModal(); await loadData(); await recalcularKmVeiculo(veiculo_id); await loadData(); updateDashboard();
 }
 
 async function addPreventiva() {
@@ -965,8 +1000,7 @@ async function addPreventiva() {
         ? await sb.from('preventivas').update(payload).eq('id', editContext.id)
         : await sb.from('preventivas').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
-    await atualizarKmVeiculo(veiculo_id, km_atual);
-    closeModal(); await loadData(); updateDashboard();
+    closeModal(); await loadData(); await recalcularKmVeiculo(veiculo_id); await loadData(); updateDashboard();
 }
 
 async function addCorretiva() {
@@ -984,8 +1018,7 @@ async function addCorretiva() {
         ? await sb.from('corretivas').update(payload).eq('id', editContext.id)
         : await sb.from('corretivas').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
-    if (km_atual) await atualizarKmVeiculo(veiculo_id, km_atual);
-    closeModal(); await loadData(); updateDashboard();
+    closeModal(); await loadData(); await recalcularKmVeiculo(veiculo_id); await loadData(); updateDashboard();
 }
 
 async function addCargaBomba() {
@@ -1044,6 +1077,43 @@ async function marcarContaPaga(id) {
     });
     await sb.from('bancos').update({ saldo: Number(banco.saldo) - Number(conta.valor) }).eq('id', banco.id);
     await sb.from('contas_pagar').update({ status: 'pago', data_pagamento: new Date().toISOString().slice(0,10), banco_id: banco.id }).eq('id', id);
+
+    await loadData(); updateDashboard();
+}
+
+async function addContaReceber() {
+    const isEdit = editContext && editContext.type === 'contaReceber';
+    const cliente_id = document.getElementById('contaReceberCliente').value || null;
+    const descricao = document.getElementById('contaReceberDescricao').value;
+    const valor = parseFloat(document.getElementById('contaReceberValor').value);
+    const data_vencimento = document.getElementById('contaReceberVencimento').value;
+    if (!valor || !data_vencimento) { alert('Preencha valor e data de vencimento'); return; }
+    const payload = { cliente_id, descricao, valor, data_vencimento };
+    const { error } = isEdit
+        ? await sb.from('contas_receber').update(payload).eq('id', editContext.id)
+        : await sb.from('contas_receber').insert({ empresa_id: currentEmpresa.id, ...payload, status: 'pendente' });
+    if (error) { alertErro(error); return; }
+    closeModal(); await loadData(); updateDashboard();
+}
+
+async function marcarContaRecebida(id) {
+    const conta = data.contas_receber.find(c => c.id === id);
+    if (!conta) return;
+    if (data.bancos.length === 0) { alert('Cadastre um banco primeiro pra poder marcar como recebido.'); return; }
+    const nomesBancos = data.bancos.map((b,i) => `${i+1} - ${b.nome}`).join('\n');
+    const nomeCliente = data.clientes.find(c => c.id === conta.cliente_id)?.nome || 'Cliente';
+    const escolha = prompt(`Marcar recebimento de "${nomeCliente}" (R$ ${Number(conta.valor).toFixed(2)}) como recebido. Em qual banco entrou?\n${nomesBancos}`);
+    const idx = parseInt(escolha) - 1;
+    if (!data.bancos[idx]) return;
+    const banco = data.bancos[idx];
+
+    const categoria = data.financeiro_categorias.find(c => c.nome === 'Outro')?.nome || data.financeiro_categorias[0]?.nome || 'Outro';
+    await sb.from('financeiro').insert({
+        empresa_id: currentEmpresa.id, banco_id: banco.id, data: new Date().toISOString().slice(0,10), tipo: 'entrada',
+        motivo: categoria, descricao: `Recebimento - ${nomeCliente}${conta.descricao ? ' - ' + conta.descricao : ''}`, valor: Number(conta.valor)
+    });
+    await sb.from('bancos').update({ saldo: Number(banco.saldo) + Number(conta.valor) }).eq('id', banco.id);
+    await sb.from('contas_receber').update({ status: 'recebido', data_recebimento: new Date().toISOString().slice(0,10), banco_id: banco.id }).eq('id', id);
 
     await loadData(); updateDashboard();
 }
@@ -1142,8 +1212,7 @@ async function addRota() {
         ? await sb.from('rotas').update(payload).eq('id', editContext.id)
         : await sb.from('rotas').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
-    await atualizarKmVeiculo(veiculo_id, km_fim);
-    closeModal(); await loadData(); updateDashboard();
+    closeModal(); await loadData(); await recalcularKmVeiculo(veiculo_id); await loadData(); updateDashboard();
 }
 
 async function addRotaFixa() {
@@ -1266,11 +1335,36 @@ async function addViagem() {
 }
 
 // ==== RENDERIZAÇÃO ====
+function filtrarPorData(lista, campoData, dataInicio, dataFim) {
+    let r = lista;
+    if (dataInicio) r = r.filter(x => parseDataLocal(x[campoData]) >= parseDataLocal(dataInicio));
+    if (dataFim) r = r.filter(x => parseDataLocal(x[campoData]) <= parseDataLocal(dataFim));
+    return r;
+}
+
+function preencherSelectVeiculo(selectId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    const atual = sel.value;
+    sel.innerHTML = '<option value="">Todos</option>' + data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
+    sel.value = atual;
+}
+
+function limparFiltro(sufixo, fnFiltrar) {
+    const veiculoEl = document.getElementById(`filtro${sufixo}Veiculo`);
+    const inicioEl = document.getElementById(`filtro${sufixo}DataInicio`);
+    const fimEl = document.getElementById(`filtro${sufixo}DataFim`);
+    if (veiculoEl) veiculoEl.value = '';
+    if (inicioEl) inicioEl.value = '';
+    if (fimEl) fimEl.value = '';
+    fnFiltrar();
+}
+
 function loadMotoristas() {
     const linhaMotorista = m => `
         <tr><td>${m.nome}</td><td>${m.cpf}</td><td>${m.telefone}</td><td>${m.endereco}</td>
-        <td>${m.data_nascimento ? new Date(m.data_nascimento).toLocaleDateString('pt-BR') : ''}</td>
-        <td>${m.cnh_validade ? new Date(m.cnh_validade).toLocaleDateString('pt-BR') : '-'}</td>
+        <td>${m.data_nascimento ? formatarData(m.data_nascimento) : ''}</td>
+        <td>${m.cnh_validade ? formatarData(m.cnh_validade) : '-'}</td>
         <td>${m.salario ? 'R$ ' + Number(m.salario).toFixed(2) : '-'}</td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('motoristas','${m.id}','motorista')">Editar</button>
@@ -1286,20 +1380,20 @@ function loadFuncionarios() {
             <button class="btn-small" onclick="deleteItem('funcionarios', '${f.id}')">Deletar</button>
         </td></tr>`;
     document.getElementById('funcAtivosTable').innerHTML = data.funcionarios.filter(f => f.status === 'ativo').map(f =>
-        linha(f, `<td>${f.cpf}</td><td>${f.telefone}</td><td>${f.data_admissao ? new Date(f.data_admissao).toLocaleDateString('pt-BR') : '-'}</td><td>${f.salario ? 'R$ ' + Number(f.salario).toFixed(2) : '-'}</td>`)).join('');
+        linha(f, `<td>${f.cpf}</td><td>${f.telefone}</td><td>${f.data_admissao ? formatarData(f.data_admissao) : '-'}</td><td>${f.salario ? 'R$ ' + Number(f.salario).toFixed(2) : '-'}</td>`)).join('');
     document.getElementById('funcDemitidosTable').innerHTML = data.funcionarios.filter(f => f.status === 'demitido').map(f =>
-        linha(f, `<td>${f.cpf}</td><td>${f.data_admissao ? new Date(f.data_admissao).toLocaleDateString('pt-BR') : '-'}</td><td>${f.data_demissao ? new Date(f.data_demissao).toLocaleDateString('pt-BR') : '-'}</td>`)).join('');
+        linha(f, `<td>${f.cpf}</td><td>${f.data_admissao ? formatarData(f.data_admissao) : '-'}</td><td>${f.data_demissao ? formatarData(f.data_demissao) : '-'}</td>`)).join('');
     document.getElementById('funcExperienciaTable').innerHTML = data.funcionarios.filter(f => f.status === 'experiencia').map(f =>
-        linha(f, `<td>${f.cpf}</td><td>${f.experiencia_inicio ? new Date(f.experiencia_inicio).toLocaleDateString('pt-BR') : '-'}</td><td>${f.experiencia_fim ? new Date(f.experiencia_fim).toLocaleDateString('pt-BR') : '-'}</td>`)).join('');
+        linha(f, `<td>${f.cpf}</td><td>${f.experiencia_inicio ? formatarData(f.experiencia_inicio) : '-'}</td><td>${f.experiencia_fim ? formatarData(f.experiencia_fim) : '-'}</td>`)).join('');
 }
 
 function loadVeiculos() {
     document.getElementById('veiculosTable').innerHTML = data.veiculos.map(vv => `
         <tr><td>${vv.placa}</td><td>${vv.marca}</td><td>${vv.modelo}</td><td>${vv.ano}</td><td>${vv.chassi||'-'}</td><td>${vv.renavam||'-'}</td>
         <td>${Number(vv.km_atual||0).toLocaleString('pt-BR')} km</td>
-        <td>${vv.csv_validade ? new Date(vv.csv_validade).toLocaleDateString('pt-BR') : '-'}</td>
-        <td>${vv.tacografo_validade ? new Date(vv.tacografo_validade).toLocaleDateString('pt-BR') : '-'}</td>
-        <td>${vv.apolice_validade ? new Date(vv.apolice_validade).toLocaleDateString('pt-BR') : '-'}</td>
+        <td>${vv.csv_validade ? formatarData(vv.csv_validade) : '-'}</td>
+        <td>${vv.tacografo_validade ? formatarData(vv.tacografo_validade) : '-'}</td>
+        <td>${vv.apolice_validade ? formatarData(vv.apolice_validade) : '-'}</td>
         <td>${vv.crlv_ano || '-'}</td>
         <td>
             <button class="btn-small" style="background:#764ba2;" onclick="verHistoricoVeiculo('${vv.id}')">Histórico</button>
@@ -1313,7 +1407,7 @@ function loadClientes() {
         <tr><td>${c.nome}</td><td>${c.cpf_cnpj}</td><td>${c.telefone}</td>
         <td>${c.rua||''}${c.numero ? ', '+c.numero : ''}${c.bairro ? ' - '+c.bairro : ''}</td>
         <td>${c.cidade||''}${c.uf ? '/'+c.uf : ''}</td><td>${c.cep||'-'}</td>
-        <td>${c.data_nascimento ? new Date(c.data_nascimento).toLocaleDateString('pt-BR') : ''}</td>
+        <td>${c.data_nascimento ? formatarData(c.data_nascimento) : ''}</td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('clientes','${c.id}','cliente')">Editar</button>
             <button class="btn-small" onclick="deleteItem('clientes', '${c.id}')">Deletar</button>
@@ -1321,8 +1415,18 @@ function loadClientes() {
 }
 
 function loadAbastecimentos() {
-    document.getElementById('abastecimentosTable').innerHTML = data.abastecimentos.map(a => `
-        <tr><td>${veiculoPlaca(a.veiculo_id)}</td><td>${a.fonte === 'bomba' ? '🛢️ Bomba' : '⛽ Posto'}</td><td>${new Date(a.data).toLocaleDateString('pt-BR')}</td>
+    preencherSelectVeiculo('filtroAbastecimentoVeiculo');
+    filtrarAbastecimentos();
+}
+function filtrarAbastecimentos() {
+    const veiculoId = document.getElementById('filtroAbastecimentoVeiculo')?.value || '';
+    const dataInicio = document.getElementById('filtroAbastecimentoDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroAbastecimentoDataFim')?.value || '';
+    let lista = data.abastecimentos;
+    if (veiculoId) lista = lista.filter(a => a.veiculo_id === veiculoId);
+    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    document.getElementById('abastecimentosTable').innerHTML = lista.map(a => `
+        <tr><td>${veiculoPlaca(a.veiculo_id)}</td><td>${a.fonte === 'bomba' ? '🛢️ Bomba' : '⛽ Posto'}</td><td>${formatarData(a.data)}</td>
         <td>${a.km}</td><td>${Number(a.litros).toFixed(2)}</td><td>R$ ${Number(a.valor_litro).toFixed(2)}</td>
         <td>R$ ${Number(a.valor_total).toFixed(2)}</td><td>${Number(a.kml).toFixed(2)} km/l</td>
         <td>
@@ -1332,8 +1436,18 @@ function loadAbastecimentos() {
 }
 
 function loadPneus() {
-    document.getElementById('neusTable').innerHTML = data.pneus.map(p => `
-        <tr><td>${veiculoPlaca(p.veiculo_id)}</td><td>${new Date(p.data).toLocaleDateString('pt-BR')}</td>
+    preencherSelectVeiculo('filtroPneuVeiculo');
+    filtrarPneus();
+}
+function filtrarPneus() {
+    const veiculoId = document.getElementById('filtroPneuVeiculo')?.value || '';
+    const dataInicio = document.getElementById('filtroPneuDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroPneuDataFim')?.value || '';
+    let lista = data.pneus;
+    if (veiculoId) lista = lista.filter(p => p.veiculo_id === veiculoId);
+    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    document.getElementById('neusTable').innerHTML = lista.map(p => `
+        <tr><td>${veiculoPlaca(p.veiculo_id)}</td><td>${formatarData(p.data)}</td>
         <td>${p.tipo||'-'}</td><td>${p.oficina||'-'}</td><td>${p.quantidade||1}</td>
         <td>R$ ${Number(p.valor_unitario||0).toFixed(2)}</td><td>R$ ${Number(p.valor||0).toFixed(2)}</td>
         <td>${p.km_atual} km</td><td>${veiculoKmAtual(p.veiculo_id).toLocaleString('pt-BR')} km</td><td>${p.km_proxima||'-'} km</td>
@@ -1344,10 +1458,20 @@ function loadPneus() {
 }
 
 function loadOleos() {
-    document.getElementById('oleosTable').innerHTML = data.oleos.map(o => {
+    preencherSelectVeiculo('filtroOleoVeiculo');
+    filtrarOleos();
+}
+function filtrarOleos() {
+    const veiculoId = document.getElementById('filtroOleoVeiculo')?.value || '';
+    const dataInicio = document.getElementById('filtroOleoDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroOleoDataFim')?.value || '';
+    let lista = data.oleos;
+    if (veiculoId) lista = lista.filter(o => o.veiculo_id === veiculoId);
+    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    document.getElementById('oleosTable').innerHTML = lista.map(o => {
         const kmFaltando = o.km_proxima - veiculoKmAtual(o.veiculo_id);
         const cls = kmFaltando <= 5000 ? 'style="background:#fff3cd;"' : '';
-        return `<tr ${cls}><td>${veiculoPlaca(o.veiculo_id)}</td><td>${new Date(o.data).toLocaleDateString('pt-BR')}</td>
+        return `<tr ${cls}><td>${veiculoPlaca(o.veiculo_id)}</td><td>${formatarData(o.data)}</td>
         <td>${o.tipo}</td><td>${o.lugar||'-'}</td><td>${o.litragem||'-'}</td>
         <td>${o.km_atual} km</td><td>${veiculoKmAtual(o.veiculo_id).toLocaleString('pt-BR')} km</td><td>${o.km_proxima} km</td>
         <td>R$ ${Number(o.valor).toFixed(2)}</td>
@@ -1359,10 +1483,20 @@ function loadOleos() {
 }
 
 function loadPreventivas() {
-    document.getElementById('preventivaTable').innerHTML = data.preventivas.map(p => {
+    preencherSelectVeiculo('filtroPreventivaVeiculo');
+    filtrarPreventivas();
+}
+function filtrarPreventivas() {
+    const veiculoId = document.getElementById('filtroPreventivaVeiculo')?.value || '';
+    const dataInicio = document.getElementById('filtroPreventivaDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroPreventivaDataFim')?.value || '';
+    let lista = data.preventivas;
+    if (veiculoId) lista = lista.filter(p => p.veiculo_id === veiculoId);
+    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    document.getElementById('preventivaTable').innerHTML = lista.map(p => {
         const kmFaltando = p.km_proxima - (p.km_atual || 0);
         const cls = kmFaltando <= 5000 ? 'style="background:#fff3cd;"' : '';
-        return `<tr ${cls}><td>${veiculoPlaca(p.veiculo_id)}</td><td>${new Date(p.data).toLocaleDateString('pt-BR')}</td>
+        return `<tr ${cls}><td>${veiculoPlaca(p.veiculo_id)}</td><td>${formatarData(p.data)}</td>
         <td>${p.descricao}</td><td>${p.km_atual} km</td><td>${p.km_proxima} km</td><td>${kmFaltando} km</td>
         <td>R$ ${Number(p.valor).toFixed(2)}</td>
         <td>
@@ -1373,8 +1507,18 @@ function loadPreventivas() {
 }
 
 function loadCorretivas() {
-    document.getElementById('corretivaTable').innerHTML = data.corretivas.map(c => `
-        <tr><td>${veiculoPlaca(c.veiculo_id)}</td><td>${new Date(c.data).toLocaleDateString('pt-BR')}</td>
+    preencherSelectVeiculo('filtroCorretivaVeiculo');
+    filtrarCorretivas();
+}
+function filtrarCorretivas() {
+    const veiculoId = document.getElementById('filtroCorretivaVeiculo')?.value || '';
+    const dataInicio = document.getElementById('filtroCorretivaDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroCorretivaDataFim')?.value || '';
+    let lista = data.corretivas;
+    if (veiculoId) lista = lista.filter(c => c.veiculo_id === veiculoId);
+    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    document.getElementById('corretivaTable').innerHTML = lista.map(c => `
+        <tr><td>${veiculoPlaca(c.veiculo_id)}</td><td>${formatarData(c.data)}</td>
         <td>${c.descricao}</td><td>${c.oficina||'-'}</td><td>${c.km_atual||'-'}</td>
         <td>${veiculoKmAtual(c.veiculo_id).toLocaleString('pt-BR')} km</td><td>${c.km_proxima||'-'}</td>
         <td>R$ ${Number(c.valor).toFixed(2)}</td>
@@ -1387,7 +1531,7 @@ function loadCorretivas() {
 function loadContasPagar() {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
     document.getElementById('contasPagarTable').innerHTML = data.contas_pagar.map(c => {
-        const vencimento = new Date(c.data_vencimento);
+        const vencimento = parseDataLocal(c.data_vencimento);
         const atrasada = c.status === 'pendente' && vencimento < hoje;
         const badge = c.status === 'pago' ? '<span class="badge badge-pago">Pago</span>'
             : atrasada ? '<span class="badge badge-pendente">Atrasado</span>'
@@ -1395,11 +1539,32 @@ function loadContasPagar() {
         return `<tr ${atrasada ? 'class="estoque-baixo"' : ''}>
             <td>${c.fornecedor}</td><td>${c.descricao||'-'}</td><td>${vencimento.toLocaleDateString('pt-BR')}</td>
             <td>R$ ${Number(c.valor).toFixed(2)}</td><td>${badge}</td>
-            <td>${c.data_pagamento ? new Date(c.data_pagamento).toLocaleDateString('pt-BR') : '-'}</td>
+            <td>${c.data_pagamento ? formatarData(c.data_pagamento) : '-'}</td>
             <td>
                 ${c.status === 'pendente' ? `<button class="btn-small" style="background:#4caf50;" onclick="marcarContaPaga('${c.id}')">Marcar Pago</button>` : ''}
                 <button class="btn-small" style="background:#0066cc;" onclick="editarItem('contas_pagar','${c.id}','contaPagar')">Editar</button>
                 <button class="btn-small" onclick="deleteItem('contas_pagar', '${c.id}')">Deletar</button>
+            </td></tr>`;
+    }).join('');
+}
+
+function loadContasReceber() {
+    const hoje = new Date(); hoje.setHours(0,0,0,0);
+    document.getElementById('contasReceberTable').innerHTML = data.contas_receber.map(c => {
+        const vencimento = parseDataLocal(c.data_vencimento);
+        const atrasada = c.status === 'pendente' && vencimento < hoje;
+        const badge = c.status === 'recebido' ? '<span class="badge badge-pago">Recebido</span>'
+            : atrasada ? '<span class="badge badge-pendente">Atrasado</span>'
+            : '<span class="badge" style="background:#fff3cd; color:#856404;">Pendente</span>';
+        const nomeCliente = data.clientes.find(cl => cl.id === c.cliente_id)?.nome || '-';
+        return `<tr ${atrasada ? 'class="estoque-baixo"' : ''}>
+            <td>${nomeCliente}</td><td>${c.descricao||'-'}</td><td>${formatarData(c.data_vencimento)}</td>
+            <td>R$ ${Number(c.valor).toFixed(2)}</td><td>${badge}</td>
+            <td>${c.data_recebimento ? formatarData(c.data_recebimento) : '-'}</td>
+            <td>
+                ${c.status === 'pendente' ? `<button class="btn-small" style="background:#4caf50;" onclick="marcarContaRecebida('${c.id}')">Marcar Recebido</button>` : ''}
+                <button class="btn-small" style="background:#0066cc;" onclick="editarItem('contas_receber','${c.id}','contaReceber')">Editar</button>
+                <button class="btn-small" onclick="deleteItem('contas_receber', '${c.id}')">Deletar</button>
             </td></tr>`;
     }).join('');
 }
@@ -1420,7 +1585,7 @@ function loadBomba() {
     document.getElementById('nivelBombaDash').textContent = nivel.atual.toFixed(0);
 
     document.getElementById('bombaCargasTable').innerHTML = data.bomba_cargas.map(c => `
-        <tr><td>${new Date(c.data).toLocaleDateString('pt-BR')}</td><td>${Number(c.litros).toFixed(0)} L</td>
+        <tr><td>${formatarData(c.data)}</td><td>${Number(c.litros).toFixed(0)} L</td>
         <td>R$ ${Number(c.valor_total).toFixed(2)}</td><td>${c.fornecedor||'-'}</td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('bomba_cargas','${c.id}','cargaBomba')">Editar</button>
@@ -1430,7 +1595,7 @@ function loadBomba() {
 
 function loadMultas() {
     document.getElementById('multasTable').innerHTML = data.multas.map(m => `
-        <tr><td>${veiculoPlaca(m.veiculo_id)}</td><td>${new Date(m.data).toLocaleDateString('pt-BR')}</td>
+        <tr><td>${veiculoPlaca(m.veiculo_id)}</td><td>${formatarData(m.data)}</td>
         <td>${m.descricao}</td><td>R$ ${Number(m.valor).toFixed(2)}</td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('multas','${m.id}','multa')">Editar</button>
@@ -1449,7 +1614,7 @@ function loadBancos() {
 
 function loadFinanceiro() {
     document.getElementById('financeiroTable').innerHTML = data.financeiro.map(f => `
-        <tr><td>${new Date(f.data).toLocaleDateString('pt-BR')}</td><td>${data.bancos.find(b=>b.id===f.banco_id)?.nome || 'N/A'}</td>
+        <tr><td>${formatarData(f.data)}</td><td>${data.bancos.find(b=>b.id===f.banco_id)?.nome || 'N/A'}</td>
         <td>${f.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td><td>${f.motivo}</td><td>${f.descricao||''}</td>
         <td>R$ ${Number(f.valor).toFixed(2)}</td>
         <td>
@@ -1459,17 +1624,45 @@ function loadFinanceiro() {
 }
 
 function loadRotas() {
-    document.getElementById('rotasTable').innerHTML = data.rotas.map(r => `
+    preencherFiltrosRotas();
+    filtrarRotas();
+}
+
+function preencherFiltrosRotas() {
+    const selFixa = document.getElementById('filtroRotasFixa');
+    const selMotorista = document.getElementById('filtroRotasMotorista');
+    if (!selFixa || !selMotorista) return;
+    const atualFixa = selFixa.value, atualMotorista = selMotorista.value;
+    selFixa.innerHTML = '<option value="">Todas</option>' + data.rotas_fixas.map(rf => `<option value="${rf.id}">${rf.nome}</option>`).join('');
+    selMotorista.innerHTML = '<option value="">Todos</option>' + data.motoristas.map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
+    selFixa.value = atualFixa;
+    selMotorista.value = atualMotorista;
+}
+
+function filtrarRotas() {
+    const rotaFixaId = document.getElementById('filtroRotasFixa')?.value || '';
+    const motoristaId = document.getElementById('filtroRotasMotorista')?.value || '';
+    let filtrado = data.rotas;
+    if (rotaFixaId) filtrado = filtrado.filter(r => r.rota_fixa_id === rotaFixaId);
+    if (motoristaId) filtrado = filtrado.filter(r => r.motorista_id === motoristaId);
+
+    document.getElementById('rotasTable').innerHTML = filtrado.map(r => `
         <tr><td>${veiculoPlaca(r.veiculo_id)}</td><td>${motoristaNome(r.motorista_id)}</td>
         <td>${r.local_saida}</td><td>${r.destino}</td>
         <td>${data.rotas_fixas.find(rf=>rf.id===r.rota_fixa_id)?.nome || '-'}</td>
-        <td>${r.data_inicio ? new Date(r.data_inicio).toLocaleDateString('pt-BR') : ''}</td>
-        <td>${r.data_fim ? new Date(r.data_fim).toLocaleDateString('pt-BR') : ''}</td>
+        <td>${r.data_inicio ? formatarData(r.data_inicio) : ''}</td>
+        <td>${r.data_fim ? formatarData(r.data_fim) : ''}</td>
         <td>${kmPercorrido(r)} km</td><td>${tempoTotal(r)}</td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('rotas','${r.id}','rota')">Editar</button>
             <button class="btn-small" onclick="deleteItem('rotas', '${r.id}')">Deletar</button>
         </td></tr>`).join('');
+}
+
+function limparFiltrosRotas() {
+    document.getElementById('filtroRotasFixa').value = '';
+    document.getElementById('filtroRotasMotorista').value = '';
+    filtrarRotas();
 }
 
 function loadProdutos() {
@@ -1489,7 +1682,7 @@ function loadMovimentacoes() {
     document.getElementById('movimentacoesTable').innerHTML = data.estoque_movimentacoes.map(m => {
         const produto = data.produtos.find(p => p.id === m.produto_id);
         return `<tr><td>${produto ? produto.nome : 'N/A'}</td><td>${m.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td>
-        <td>${m.quantidade}</td><td>${m.motivo || ''}</td><td>${new Date(m.data).toLocaleDateString('pt-BR')}</td>
+        <td>${m.quantidade}</td><td>${m.motivo || ''}</td><td>${formatarData(m.data)}</td>
         <td><button class="btn-small" onclick="deleteItem('estoque_movimentacoes', '${m.id}')">Deletar</button></td></tr>`;
     }).join('');
 }
@@ -1498,7 +1691,7 @@ function loadAgenda() {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
     const ordenados = [...data.agenda].sort((a,b) => new Date(a.data + 'T' + (a.hora||'00:00')) - new Date(b.data + 'T' + (b.hora||'00:00')));
     document.getElementById('agendaContent').innerHTML = ordenados.map(a => {
-        const dataEvento = new Date(a.data);
+        const dataEvento = parseDataLocal(a.data);
         const isPast = dataEvento < hoje;
         return `<div class="birthday-item ${!isPast && dataEvento.toDateString() === hoje.toDateString() ? 'today' : ''}" style="${isPast ? 'opacity:0.5;' : ''}">
             <div class="birthday-info"><h4>${a.titulo} ${a.categoria ? `<span style="font-size:11px; color:#666;">(${a.categoria})</span>` : ''}</h4>
@@ -1528,7 +1721,7 @@ function filtrarTurismo() {
     if (clienteId) filtrado = filtrado.filter(vv => vv.cliente_id === clienteId);
     document.getElementById('turismoTable').innerHTML = filtrado.map(vg => {
         const gastoVeiculo = vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0;
-        return `<tr><td>${new Date(vg.data).toLocaleDateString('pt-BR')}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
+        return `<tr><td>${formatarData(vg.data)}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
         <td>${motoristaNome(vg.motorista_id)}</td><td>${data.clientes.find(c=>c.id===vg.cliente_id)?.nome || 'N/A'}</td>
         <td>${veiculoPlaca(vg.veiculo_id)}</td><td>R$ ${Number(vg.valor_viagem).toFixed(2)}</td>
         <td>R$ ${Number(vg.valor_pedagio||0).toFixed(2)}</td>
@@ -1628,6 +1821,60 @@ function renderRotasFixasPerformance() {
 
 function toggleSubList(id) { document.getElementById(id).classList.toggle('open'); }
 
+function limparFiltroMedias() {
+    document.getElementById('filtroMediasVeiculo').value = '';
+    document.getElementById('filtroMediasDataInicio').value = '';
+    document.getElementById('filtroMediasDataFim').value = '';
+    gerarRelatorioMedias();
+}
+
+function gerarRelatorioMedias() {
+    preencherSelectVeiculo('filtroMediasVeiculo');
+    const veiculoId = document.getElementById('filtroMediasVeiculo')?.value || '';
+    const dataInicio = document.getElementById('filtroMediasDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroMediasDataFim')?.value || '';
+
+    const veiculosAlvo = veiculoId ? data.veiculos.filter(vv => vv.id === veiculoId) : data.veiculos;
+
+    document.getElementById('relatorioMediasContent').innerHTML = veiculosAlvo.map(vv => {
+        const abastecimentos = filtrarPorData(data.abastecimentos.filter(a => a.veiculo_id === vv.id), 'data', dataInicio, dataFim);
+        const pneus = filtrarPorData(data.pneus.filter(p => p.veiculo_id === vv.id), 'data', dataInicio, dataFim);
+        const oleos = filtrarPorData(data.oleos.filter(o => o.veiculo_id === vv.id), 'data', dataInicio, dataFim);
+
+        if (abastecimentos.length === 0 && pneus.length === 0 && oleos.length === 0) return '';
+
+        const mediaKmL = abastecimentos.length ? (abastecimentos.reduce((s,a) => s + Number(a.kml||0), 0) / abastecimentos.length).toFixed(2) : '-';
+        const mediaGastoAbastecimento = abastecimentos.length ? (abastecimentos.reduce((s,a) => s + Number(a.valor_total||0), 0) / abastecimentos.length).toFixed(2) : '-';
+        const totalGastoCombustivel = abastecimentos.reduce((s,a) => s + Number(a.valor_total||0), 0);
+
+        const mediaGastoPneu = pneus.length ? (pneus.reduce((s,p) => s + Number(p.valor||0), 0) / pneus.length).toFixed(2) : '-';
+        const totalGastoPneu = pneus.reduce((s,p) => s + Number(p.valor||0), 0);
+
+        const mediaGastoOleo = oleos.length ? (oleos.reduce((s,o) => s + Number(o.valor||0), 0) / oleos.length).toFixed(2) : '-';
+        const mediaLitragemOleo = oleos.length ? (oleos.reduce((s,o) => s + Number(o.litragem||0), 0) / oleos.length).toFixed(1) : '-';
+        const totalGastoOleo = oleos.reduce((s,o) => s + Number(o.valor||0), 0);
+
+        return `<div class="performance-card">
+            <h4>🚐 ${vv.placa} - ${vv.marca} ${vv.modelo}</h4>
+            <div class="performance-stats">
+                <div class="stat"><div class="stat-value">${mediaKmL}</div><div class="stat-label">Média KM/L (${abastecimentos.length} abastec.)</div></div>
+                <div class="stat"><div class="stat-value">R$ ${mediaGastoAbastecimento}</div><div class="stat-label">Média por Abastecimento</div></div>
+                <div class="stat"><div class="stat-value">R$ ${totalGastoCombustivel.toFixed(2)}</div><div class="stat-label">Total Combustível</div></div>
+            </div>
+            <div class="performance-stats" style="margin-top:10px;">
+                <div class="stat"><div class="stat-value">R$ ${mediaGastoPneu}</div><div class="stat-label">Média por Troca de Pneu (${pneus.length}x)</div></div>
+                <div class="stat"><div class="stat-value">R$ ${totalGastoPneu.toFixed(2)}</div><div class="stat-label">Total Pneus</div></div>
+                <div class="stat"><div class="stat-value">R$ ${mediaGastoOleo}</div><div class="stat-label">Média por Troca de Óleo (${oleos.length}x)</div></div>
+            </div>
+            <div class="performance-stats" style="margin-top:10px;">
+                <div class="stat"><div class="stat-value">${mediaLitragemOleo}</div><div class="stat-label">Média Litragem de Óleo</div></div>
+                <div class="stat"><div class="stat-value">R$ ${totalGastoOleo.toFixed(2)}</div><div class="stat-label">Total Óleo</div></div>
+                <div class="stat"><div class="stat-value">R$ ${(totalGastoCombustivel+totalGastoPneu+totalGastoOleo).toFixed(2)}</div><div class="stat-label">Total Geral (dos 3)</div></div>
+            </div>
+        </div>`;
+    }).join('') || '<p style="color:#666;">Nenhum dado de abastecimento, pneu ou óleo encontrado com esses filtros.</p>';
+}
+
 function verHistoricoVeiculo(veiculoId) {
     const vv = data.veiculos.find(x => x.id === veiculoId);
     if (!vv) return;
@@ -1651,7 +1898,7 @@ function verHistoricoVeiculo(veiculoId) {
         <div style="max-height:400px; overflow-y:auto;">
             ${eventos.map(e => `
                 <div class="gasto-item">
-                    <div class="gasto-info"><h4>${e.tipo}</h4><p>${new Date(e.data).toLocaleDateString('pt-BR')} • ${e.desc}</p></div>
+                    <div class="gasto-info"><h4>${e.tipo}</h4><p>${formatarData(e.data)} • ${e.desc}</p></div>
                     ${e.valor != null ? `<div class="gasto-valor">R$ ${e.valor.toFixed(2)}</div>` : ''}
                 </div>`).join('') || '<p style="color:#666;">Nenhum evento registrado ainda pra esse veículo.</p>'}
         </div>
@@ -1670,7 +1917,7 @@ function carregarAlertasDocumentos() {
         if (vv.apolice_validade) itens.push({ nome: `Apólice - ${vv.placa}`, data: vv.apolice_validade });
     });
     const comDias = itens.map(it => {
-        const dataVenc = new Date(it.data);
+        const dataVenc = parseDataLocal(it.data);
         const dias = Math.ceil((dataVenc - hoje) / (1000*60*60*24));
         return { ...it, dias };
     }).filter(it => it.dias <= 30).sort((a,b) => a.dias - b.dias);
@@ -1679,7 +1926,7 @@ function carregarAlertasDocumentos() {
         ? '<p style="color:#666;">Nenhum documento vencendo nos próximos 30 dias. 👍</p>'
         : comDias.map(it => `
             <div class="gasto-item">
-                <div class="gasto-info"><h4>${it.nome}</h4><p>${new Date(it.data).toLocaleDateString('pt-BR')}</p></div>
+                <div class="gasto-info"><h4>${it.nome}</h4><p>${formatarData(it.data)}</p></div>
                 <div class="gasto-valor" style="color:${it.dias < 0 ? '#ff6b6b' : '#ffc107'};">${it.dias < 0 ? `Vencido há ${Math.abs(it.dias)} dias` : `Em ${it.dias} dias`}</div>
             </div>`).join('');
 }
@@ -1708,7 +1955,7 @@ function loadAniversarios() {
         ...data.clientes.map(c => ({ ...c, tipo: 'Cliente' }))
     ];
     const aniversarios = pessoas.filter(p => p.data_nascimento).map(p => {
-        const dataNasc = new Date(p.data_nascimento);
+        const dataNasc = parseDataLocal(p.data_nascimento);
         const aniversarioEsteAno = new Date(hoje.getFullYear(), dataNasc.getMonth(), dataNasc.getDate());
         if (aniversarioEsteAno < hoje) aniversarioEsteAno.setFullYear(hoje.getFullYear() + 1);
         const diasFaltando = Math.ceil((aniversarioEsteAno - hoje) / (1000*60*60*24));
@@ -1717,7 +1964,7 @@ function loadAniversarios() {
     }).sort((a,b) => a.diasFaltando - b.diasFaltando);
     document.getElementById('aniversariosContent').innerHTML = aniversarios.map(p => `
         <div class="birthday-item ${p.diasFaltando === 0 ? 'today' : ''}">
-            <div class="birthday-info"><h4>${p.nome}</h4><p>${p.tipo} • ${new Date(p.data_nascimento).toLocaleDateString('pt-BR')} • Em ${p.diasFaltando} dias</p></div>
+            <div class="birthday-info"><h4>${p.nome}</h4><p>${p.tipo} • ${formatarData(p.data_nascimento)} • Em ${p.diasFaltando} dias</p></div>
             <div class="birthday-age">${p.idade} anos</div></div>`).join('');
 }
 
@@ -1738,9 +1985,18 @@ async function deleteItem(type, id) {
         }
     }
 
+    // Guarda o veículo afetado (se for um tipo que impacta o KM) pra recalcular depois de apagar
+    const tiposComKm = ['rotas', 'abastecimentos', 'pneus', 'oleos', 'preventivas', 'corretivas'];
+    let veiculoAfetado = null;
+    if (tiposComKm.includes(type)) {
+        const registro = data[type].find(x => x.id === id);
+        veiculoAfetado = registro?.veiculo_id || null;
+    }
+
     const { error } = await sb.from(type).delete().eq('id', id);
     if (error) { alertErro(error); return; }
     await loadData();
+    if (veiculoAfetado) { await recalcularKmVeiculo(veiculoAfetado); await loadData(); }
     updateDashboard();
     if (type === 'agenda') loadAgenda();
     if (type === 'turismo_viagens') filtrarTurismo();
@@ -1755,7 +2011,7 @@ function updateDashboard() {
     document.getElementById('countMultas').textContent = data.multas.length;
     document.getElementById('countEstoqueBaixo').textContent = data.produtos.filter(p => Number(p.quantidade) <= Number(p.quantidade_minima)).length;
     const em7dias = new Date(); em7dias.setDate(em7dias.getDate() + 7);
-    document.getElementById('countContasPagarVencendo').textContent = data.contas_pagar.filter(c => c.status === 'pendente' && new Date(c.data_vencimento) <= em7dias).length;
+    document.getElementById('countContasPagarVencendo').textContent = data.contas_pagar.filter(c => c.status === 'pendente' && parseDataLocal(c.data_vencimento) <= em7dias).length;
     document.getElementById('nivelBombaDash').textContent = nivelBomba().atual.toFixed(0);
     document.getElementById('totalGasto').textContent = 'R$ ' + calcularTotalGasto().toFixed(2);
     carregarTopGastos();
@@ -1785,7 +2041,7 @@ function carregarTopGastos() {
     data.multas.forEach(m => gastos.push({ descricao: `Multa - ${veiculoPlaca(m.veiculo_id)}`, valor: Number(m.valor), data: m.data, tipo: 'Multa' }));
     gastos.sort((a,b) => b.valor - a.valor);
     document.getElementById('topGastosList').innerHTML = gastos.slice(0,10).map(g => `
-        <div class="gasto-item"><div class="gasto-info"><h4>${g.descricao}</h4><p>${new Date(g.data).toLocaleDateString('pt-BR')} • ${g.tipo}</p></div>
+        <div class="gasto-item"><div class="gasto-info"><h4>${g.descricao}</h4><p>${formatarData(g.data)} • ${g.tipo}</p></div>
         <div class="gasto-valor">R$ ${g.valor.toFixed(2)}</div></div>`).join('');
 }
 
@@ -1824,7 +2080,7 @@ function filtrarFinanceiro() {
     if (tipo) filtrado = filtrado.filter(f => f.tipo === tipo);
     if (motivo) filtrado = filtrado.filter(f => f.motivo === motivo);
     document.getElementById('financeiroTable').innerHTML = filtrado.map(f => `
-        <tr><td>${new Date(f.data).toLocaleDateString('pt-BR')}</td><td>${data.bancos.find(b=>b.id===f.banco_id)?.nome || 'N/A'}</td>
+        <tr><td>${formatarData(f.data)}</td><td>${data.bancos.find(b=>b.id===f.banco_id)?.nome || 'N/A'}</td>
         <td>${f.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td><td>${f.motivo}</td><td>${f.descricao||''}</td>
         <td>R$ ${Number(f.valor).toFixed(2)}</td>
         <td>
@@ -1901,7 +2157,7 @@ function gerarRelatorioRotas() {
         const custoPorKm = kmP > 0 ? (g.total/kmP).toFixed(2) : 0;
         const rotaFixa = data.rotas_fixas.find(rf => rf.id === r.rota_fixa_id)?.nome || '-';
         return `<tr><td>${veiculoPlaca(r.veiculo_id)}</td><td>${motoristaNome(r.motorista_id)}</td><td>${rotaFixa}</td><td>${r.local_saida}</td><td>${r.destino}</td>
-        <td>${new Date(r.data_inicio).toLocaleDateString('pt-BR')}</td><td>${tempoTotal(r)}</td><td>${kmP} km</td>
+        <td>${formatarData(r.data_inicio)}</td><td>${tempoTotal(r)}</td><td>${kmP} km</td>
         <td>R$ ${g.combustivel.toFixed(2)}</td><td>R$ ${g.manutencao.toFixed(2)}</td><td>R$ ${g.multas.toFixed(2)}</td>
         <td><strong>R$ ${g.total.toFixed(2)}</strong></td><td>R$ ${custoPorKm}/km</td></tr>`;
     }).join('');
@@ -1930,7 +2186,7 @@ function gerarRelatorioTurismo() {
     document.getElementById('turismoRelatorioTable').innerHTML = data.turismo_viagens.map(vg => {
         const gastoVeiculo = vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0;
         const totalViagem = Number(vg.valor_pedagio||0) + Number(vg.combustivel_valor||0) + Number(vg.valor_diaria||0) + Number(vg.outros_valor||0) + gastoVeiculo;
-        return `<tr><td>${new Date(vg.data).toLocaleDateString('pt-BR')}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
+        return `<tr><td>${formatarData(vg.data)}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
         <td>${motoristaNome(vg.motorista_id)}</td><td>${data.clientes.find(c=>c.id===vg.cliente_id)?.nome || 'N/A'}</td><td>${veiculoPlaca(vg.veiculo_id)}</td>
         <td>${vg.km || '-'} km</td><td>R$ ${Number(vg.valor_viagem||0).toFixed(2)}</td><td>R$ ${Number(vg.valor_pedagio||0).toFixed(2)}</td>
         <td>${vg.combustivel_litros ? Number(vg.combustivel_litros).toFixed(1)+'L / ' : ''}R$ ${Number(vg.combustivel_valor||0).toFixed(2)}</td>
@@ -1960,7 +2216,7 @@ async function loadData() {
     const empresaId = currentEmpresa.id;
     const tabelas = ['motoristas','funcionarios','veiculos','clientes','abastecimentos','pneus','oleos',
                       'preventivas','corretivas','multas','bancos','financeiro','rotas','produtos','estoque_movimentacoes',
-                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas','contas_pagar'];
+                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas','contas_pagar','contas_receber'];
 
     const resultados = await Promise.all(tabelas.map(t => sb.from(t).select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false })));
     resultados.forEach((res, i) => {
@@ -1973,6 +2229,7 @@ async function loadData() {
     loadBancos(); loadFinanceiro(); loadRotas();
     loadProdutos(); loadMovimentacoes();
     loadContasPagar();
+    loadContasReceber();
     loadBomba();
     preencherFiltroClientesTurismo(); filtrarTurismo();
     preencherFiltroRotas(); gerarRelatorioRotas();

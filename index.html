@@ -41,6 +41,7 @@
             <div class="user-info">
                 <span id="userEmail">Usuário</span>
                 <span id="empresaNome" style="font-size: 12px; opacity: 0.9;"></span>
+                <button onclick="window.print()">🖨️ Imprimir</button>
                 <button onclick="logout()">Sair</button>
             </div>
         </div>
@@ -153,12 +154,19 @@
                         <button class="tab" onclick="switchTab('preventiva')">🔧 Preventiva</button>
                         <button class="tab" onclick="switchTab('corretiva')">🛠️ Corretiva</button>
                         <button class="tab" onclick="switchTab('bomba')">⛽📊 Bomba de Combustível</button>
+                        <button class="tab" onclick="switchTab('mediasManutencao')">📊 Relatório de Médias</button>
                     </div>
 
                     <div id="abastecimentos" class="tab-content active">
                         <div class="btn-row">
                             <button onclick="openAddModal('abastecimento')">+ Adicionar Abastecimento</button>
                             <button class="btn-excel" onclick="exportarExcel('abastecimentos')">📥 Exportar Excel</button>
+                        </div>
+                        <div class="filters">
+                            <div class="filter-group"><label>Veículo</label><select id="filtroAbastecimentoVeiculo" onchange="filtrarAbastecimentos()"><option value="">Todos</option></select></div>
+                            <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroAbastecimentoDataInicio" onchange="filtrarAbastecimentos()"></div>
+                            <div class="filter-group"><label>Data Final</label><input type="date" id="filtroAbastecimentoDataFim" onchange="filtrarAbastecimentos()"></div>
+                            <button onclick="limparFiltro('Abastecimento', filtrarAbastecimentos)">Limpar Filtros</button>
                         </div>
                         <table>
                             <thead><tr><th>Veículo</th><th>Fonte</th><th>Data</th><th>KM</th><th>Litros</th><th>Valor/L</th><th>Valor Total</th><th>KM/L</th><th>Ações</th></tr></thead>
@@ -171,6 +179,12 @@
                             <button onclick="openAddModal('pneu')">+ Adicionar Pneu</button>
                             <button class="btn-excel" onclick="exportarExcel('pneus')">📥 Exportar Excel</button>
                         </div>
+                        <div class="filters">
+                            <div class="filter-group"><label>Veículo</label><select id="filtroPneuVeiculo" onchange="filtrarPneus()"><option value="">Todos</option></select></div>
+                            <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroPneuDataInicio" onchange="filtrarPneus()"></div>
+                            <div class="filter-group"><label>Data Final</label><input type="date" id="filtroPneuDataFim" onchange="filtrarPneus()"></div>
+                            <button onclick="limparFiltro('Pneu', filtrarPneus)">Limpar Filtros</button>
+                        </div>
                         <table>
                             <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>Oficina</th><th>Qtd</th><th>Valor Unit.</th><th>Valor Total</th><th>KM da Troca</th><th>KM Atual (Veículo)</th><th>KM Próxima Troca</th><th>Ações</th></tr></thead>
                             <tbody id="neusTable"></tbody>
@@ -181,6 +195,12 @@
                         <div class="btn-row">
                             <button onclick="openAddModal('oleo')">+ Adicionar Óleo</button>
                             <button class="btn-excel" onclick="exportarExcel('oleos')">📥 Exportar Excel</button>
+                        </div>
+                        <div class="filters">
+                            <div class="filter-group"><label>Veículo</label><select id="filtroOleoVeiculo" onchange="filtrarOleos()"><option value="">Todos</option></select></div>
+                            <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroOleoDataInicio" onchange="filtrarOleos()"></div>
+                            <div class="filter-group"><label>Data Final</label><input type="date" id="filtroOleoDataFim" onchange="filtrarOleos()"></div>
+                            <button onclick="limparFiltro('Oleo', filtrarOleos)">Limpar Filtros</button>
                         </div>
                         <table>
                             <thead><tr><th>Veículo</th><th>Data</th><th>Tipo</th><th>Lugar</th><th>Litragem</th><th>KM da Troca</th><th>KM Atual (Veículo)</th><th>KM Próxima Troca</th><th>Valor</th><th>Ações</th></tr></thead>
@@ -193,6 +213,12 @@
                             <button onclick="openAddModal('preventiva')">+ Adicionar Manutenção Preventiva</button>
                             <button class="btn-excel" onclick="exportarExcel('preventivas')">📥 Exportar Excel</button>
                         </div>
+                        <div class="filters">
+                            <div class="filter-group"><label>Veículo</label><select id="filtroPreventivaVeiculo" onchange="filtrarPreventivas()"><option value="">Todos</option></select></div>
+                            <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroPreventivaDataInicio" onchange="filtrarPreventivas()"></div>
+                            <div class="filter-group"><label>Data Final</label><input type="date" id="filtroPreventivaDataFim" onchange="filtrarPreventivas()"></div>
+                            <button onclick="limparFiltro('Preventiva', filtrarPreventivas)">Limpar Filtros</button>
+                        </div>
                         <table>
                             <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>KM Atual</th><th>KM Próxima</th><th>KM Faltando</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="preventivaTable"></tbody>
@@ -203,6 +229,12 @@
                         <div class="btn-row">
                             <button onclick="openAddModal('corretiva')">+ Adicionar Manutenção Corretiva</button>
                             <button class="btn-excel" onclick="exportarExcel('corretivas')">📥 Exportar Excel</button>
+                        </div>
+                        <div class="filters">
+                            <div class="filter-group"><label>Veículo</label><select id="filtroCorretivaVeiculo" onchange="filtrarCorretivas()"><option value="">Todos</option></select></div>
+                            <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroCorretivaDataInicio" onchange="filtrarCorretivas()"></div>
+                            <div class="filter-group"><label>Data Final</label><input type="date" id="filtroCorretivaDataFim" onchange="filtrarCorretivas()"></div>
+                            <button onclick="limparFiltro('Corretiva', filtrarCorretivas)">Limpar Filtros</button>
                         </div>
                         <table>
                             <thead><tr><th>Veículo</th><th>Data</th><th>Descrição</th><th>Oficina</th><th>KM da Troca</th><th>KM Atual (Veículo)</th><th>KM Próxima Troca</th><th>Valor</th><th>Ações</th></tr></thead>
@@ -231,6 +263,16 @@
                             <thead><tr><th>Data</th><th>Litros</th><th>Valor Total</th><th>Fornecedor</th><th>Ações</th></tr></thead>
                             <tbody id="bombaCargasTable"></tbody>
                         </table>
+                    </div>
+
+                    <div id="mediasManutencao" class="tab-content">
+                        <div class="filters">
+                            <div class="filter-group"><label>Veículo</label><select id="filtroMediasVeiculo" onchange="gerarRelatorioMedias()"><option value="">Todos</option></select></div>
+                            <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroMediasDataInicio" onchange="gerarRelatorioMedias()"></div>
+                            <div class="filter-group"><label>Data Final</label><input type="date" id="filtroMediasDataFim" onchange="gerarRelatorioMedias()"></div>
+                            <button onclick="limparFiltroMedias()">Limpar Filtros</button>
+                        </div>
+                        <div id="relatorioMediasContent"></div>
                     </div>
                 </div>
 
@@ -325,6 +367,7 @@
                     <div class="tabs">
                         <button class="tab active" onclick="switchTab('financeiroLancamentos')">💵 Lançamentos</button>
                         <button class="tab" onclick="switchTab('financeiroContasPagar')">📆 Contas a Pagar</button>
+                        <button class="tab" onclick="switchTab('financeiroContasReceber')">📈 Contas a Receber</button>
                     </div>
 
                     <div id="financeiroLancamentos" class="tab-content active">
@@ -355,6 +398,17 @@
                             <tbody id="contasPagarTable"></tbody>
                         </table>
                     </div>
+
+                    <div id="financeiroContasReceber" class="tab-content">
+                        <div class="btn-row">
+                            <button onclick="openAddModal('contaReceber')">+ Adicionar Conta a Receber</button>
+                            <button class="btn-excel" onclick="exportarExcel('contas_receber')">📥 Exportar Excel</button>
+                        </div>
+                        <table>
+                            <thead><tr><th>Cliente</th><th>Descrição</th><th>Vencimento</th><th>Valor</th><th>Status</th><th>Data Recebimento</th><th>Ações</th></tr></thead>
+                            <tbody id="contasReceberTable"></tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <!-- ROTAS -->
@@ -364,6 +418,11 @@
                         <button onclick="openAddModal('rota')">+ Adicionar Rota</button>
                         <button onclick="openAddModal('rotaFixa')">📌 Nova Rota Fixa</button>
                         <button class="btn-excel" onclick="exportarExcel('rotas')">📥 Exportar Excel</button>
+                    </div>
+                    <div class="filters">
+                        <div class="filter-group"><label>Rota Fixa</label><select id="filtroRotasFixa" onchange="filtrarRotas()"><option value="">Todas</option></select></div>
+                        <div class="filter-group"><label>Motorista</label><select id="filtroRotasMotorista" onchange="filtrarRotas()"><option value="">Todos</option></select></div>
+                        <button onclick="limparFiltrosRotas()">Limpar Filtros</button>
                     </div>
                     <table>
                         <thead><tr><th>Veículo</th><th>Motorista</th><th>Saída</th><th>Destino</th><th>Rota Fixa</th><th>Início</th><th>Fim</th><th>KM</th><th>Tempo</th><th>Ações</th></tr></thead>
