@@ -13,7 +13,7 @@ let data = {
     abastecimentos: [], pneus: [], oleos: [], preventivas: [], corretivas: [], multas: [],
     bancos: [], financeiro: [], rotas: [],
     produtos: [], estoque_movimentacoes: [], agenda: [], turismo_viagens: [],
-    rotas_fixas: [], financeiro_categorias: [], bomba_cargas: [], contas_pagar: [], contas_receber: [],
+    rotas_fixas: [], financeiro_categorias: [], bomba_cargas: [], contas_pagar: [], contas_receber: [], galao_oleo_cargas: [],
 };
 
 // ==== AUTENTICAÇÃO ====
@@ -23,12 +23,12 @@ async function checkAuth() {
     currentUser = session.user;
 
     const { data: perfil, error } = await sb
-        .from('perfis').select('nome, empresa_id, role, empresas(id, nome, bomba_alerta_minimo)')
+        .from('perfis').select('nome, empresa_id, role, empresas(id, nome, bomba_alerta_minimo, galao_oleo_alerta_minimo)')
         .eq('id', currentUser.id).single();
 
     if (error || !perfil) { showLoginPage(); return; }
 
-    currentEmpresa = { id: perfil.empresa_id, nome: perfil.empresas.nome, bomba_alerta_minimo: perfil.empresas.bomba_alerta_minimo };
+    currentEmpresa = { id: perfil.empresa_id, nome: perfil.empresas.nome, bomba_alerta_minimo: perfil.empresas.bomba_alerta_minimo, galao_oleo_alerta_minimo: perfil.empresas.galao_oleo_alerta_minimo };
     currentUserRole = perfil.role || 'admin';
     document.getElementById('userEmail').textContent = currentUser.email;
     document.getElementById('empresaNome').textContent = `(${currentEmpresa.nome})`;
@@ -135,7 +135,9 @@ function switchTab(tab) {
     parent.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     event.target.classList.add('active');
     if (tab === 'bomba') loadBomba();
+    if (tab === 'galaoOleo') loadGalaoOleo();
     if (tab === 'mediasManutencao') gerarRelatorioMedias();
+    if (tab === 'custosVeiculos') gerarCustosVeiculos();
 }
 
 // ==== EXPORTAR EXCEL ====
@@ -151,7 +153,7 @@ const EXPORT_CONFIG = {
         ['experiencia_inicio','Início Experiência'], ['experiencia_fim','Fim Experiência']
     ]},
     veiculos: { titulo: 'Veiculos', campos: [
-        ['placa','Placa'], ['marca','Marca'], ['modelo','Modelo'], ['ano','Ano'], ['chassi','Chassi'], ['renavam','Renavam'],
+        ['placa','Placa'], ['marca','Marca'], ['modelo','Modelo'], ['ano','Ano'], ['chassi','Chassi'], ['renavam','Renavam'], ['numero_bancos','Número de Bancos'],
         ['km_atual','KM Atual'], ['csv_validade','Validade CSV'], ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
     ]},
     clientes: { titulo: 'Clientes', campos: [
@@ -168,7 +170,7 @@ const EXPORT_CONFIG = {
         ['km_atual','KM da Troca'], ['km_proxima','KM Próxima Troca']
     ]},
     oleos: { titulo: 'Oleos', campos: [
-        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['data','Data'], ['tipo','Tipo'], ['lugar','Lugar'], ['litragem','Litragem'],
+        [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['fonte','Fonte'], ['data','Data'], ['tipo','Tipo'], ['lugar','Lugar'], ['litragem','Litragem'],
         ['km_atual','KM da Troca'], ['km_proxima','KM Próxima Troca'], ['valor','Valor']
     ]},
     preventivas: { titulo: 'Preventivas', campos: [
@@ -217,6 +219,9 @@ const EXPORT_CONFIG = {
     ]},
     bomba_cargas: { titulo: 'Bomba_Combustivel', campos: [
         ['data','Data'], ['litros','Litros'], ['valor_total','Valor Total'], ['fornecedor','Fornecedor']
+    ]},
+    galao_oleo_cargas: { titulo: 'Galao_Oleo', campos: [
+        ['data','Data'], ['tipo_oleo','Tipo de Óleo'], ['litros','Litros'], ['valor_total','Valor Total'], ['fornecedor','Fornecedor']
     ]},
     contas_pagar: { titulo: 'Contas_a_Pagar', campos: [
         ['fornecedor','Fornecedor'], ['descricao','Descrição'], ['valor','Valor'], ['data_vencimento','Vencimento'],
@@ -272,6 +277,15 @@ function tempoTotal(r) {
     const minutos = Math.floor((tempoMs % (1000*60*60)) / (1000*60));
     return `${horas}h ${minutos}m`;
 }
+function mesesOperacaoVeiculo(veiculoId) {
+    const datasRotas = data.rotas.filter(r => r.veiculo_id === veiculoId && r.data_inicio).map(r => parseDataLocal(r.data_inicio));
+    if (datasRotas.length === 0) return 1;
+    const min = new Date(Math.min(...datasRotas));
+    const max = new Date(Math.max(...datasRotas));
+    const meses = (max.getFullYear() - min.getFullYear()) * 12 + (max.getMonth() - min.getMonth()) + 1;
+    return Math.max(1, meses);
+}
+
 function custoPorKmVeiculo(veiculoId) {
     const rotasVeiculo = data.rotas.filter(r => r.veiculo_id === veiculoId);
     const kmTotal = rotasVeiculo.reduce((s, r) => s + kmPercorrido(r), 0);
@@ -282,6 +296,12 @@ function custoPorKmVeiculo(veiculoId) {
     gastos += data.preventivas.filter(p => p.veiculo_id === veiculoId).reduce((s,p) => s + Number(p.valor||0), 0);
     gastos += data.corretivas.filter(c => c.veiculo_id === veiculoId).reduce((s,c) => s + Number(c.valor||0), 0);
     gastos += data.multas.filter(m => m.veiculo_id === veiculoId).reduce((s,m) => s + Number(m.valor||0), 0);
+    // seguro e CSV são anuais: dividimos por 12 e multiplicamos pelos meses de operação do veículo
+    const veiculo = data.veiculos.find(vv => vv.id === veiculoId);
+    if (veiculo) {
+        const meses = mesesOperacaoVeiculo(veiculoId);
+        gastos += ((Number(veiculo.apolice_valor||0) + Number(veiculo.csv_valor||0)) / 12) * meses;
+    }
     return kmTotal > 0 ? gastos / kmTotal : 0;
 }
 function gastoRotaDetalhado(r) {
@@ -313,6 +333,13 @@ function nivelBomba() {
     const totalCarregado = data.bomba_cargas.reduce((s,c) => s + Number(c.litros), 0);
     const totalDispensado = data.abastecimentos.filter(a => a.fonte === 'bomba').reduce((s,a) => s + Number(a.litros), 0);
     const gastoTotal = data.bomba_cargas.reduce((s,c) => s + Number(c.valor_total), 0);
+    return { atual: totalCarregado - totalDispensado, totalCarregado, totalDispensado, gastoTotal };
+}
+
+function nivelGalaoOleo() {
+    const totalCarregado = data.galao_oleo_cargas.reduce((s,c) => s + Number(c.litros), 0);
+    const totalDispensado = data.oleos.filter(o => o.fonte === 'galao').reduce((s,o) => s + Number(o.litragem||0), 0);
+    const gastoTotal = data.galao_oleo_cargas.reduce((s,c) => s + Number(c.valor_total), 0);
     return { atual: totalCarregado - totalDispensado, totalCarregado, totalDispensado, gastoTotal };
 }
 
@@ -398,16 +425,24 @@ function openAddModal(type, item = null) {
                 <div class="form-group"><label>Chassi</label><input type="text" id="veiculoChassi" value="${v(item,'chassi')}"></div>
                 <div class="form-group"><label>Renavam</label><input type="text" id="veiculoRenavam" value="${v(item,'renavam')}"></div>
             </div>
-            <div class="form-group"><label>KM Atual</label><input type="number" id="veiculoKmAtual" value="${v(item,'km_atual',0)}"></div>
+            <div class="form-row">
+                <div class="form-group"><label>KM Atual</label><input type="number" id="veiculoKmAtual" value="${v(item,'km_atual',0)}"></div>
+                <div class="form-group"><label>Número de Bancos (assentos)</label><input type="number" id="veiculoNumeroBancos" value="${v(item,'numero_bancos')}" placeholder="Ex: 44"></div>
+            </div>
             <p style="font-size:12px; color:#666; margin: 5px 0 10px;">Os campos abaixo são opcionais:</p>
             <div class="form-row">
                 <div class="form-group"><label>Validade do CSV</label><input type="date" id="veiculoCsvValidade" value="${v(item,'csv_validade')}"></div>
+                <div class="form-group"><label>Valor do CSV (anual)</label><input type="number" id="veiculoCsvValor" step="0.01" value="${v(item,'csv_valor')}"></div>
+            </div>
+            <div class="form-row">
                 <div class="form-group"><label>Validade do Tacógrafo</label><input type="date" id="veiculoTacografoValidade" value="${v(item,'tacografo_validade')}"></div>
+                <div class="form-group"><label>Ano do CRLV</label><input type="number" id="veiculoCrlvAno" value="${v(item,'crlv_ano')}" placeholder="2026"></div>
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Validade da Apólice</label><input type="date" id="veiculoApoliceValidade" value="${v(item,'apolice_validade')}"></div>
-                <div class="form-group"><label>Ano do CRLV</label><input type="number" id="veiculoCrlvAno" value="${v(item,'crlv_ano')}" placeholder="2026"></div>
+                <div class="form-group"><label>Valor da Apólice/Seguro (anual)</label><input type="number" id="veiculoApoliceValor" step="0.01" value="${v(item,'apolice_valor')}"></div>
             </div>
+            <p style="font-size:11px; color:#666; margin: -5px 0 10px;">Esses valores anuais são divididos por 12 automaticamente ao calcular o custo/km real do veículo.</p>
             <button onclick="addVeiculo()">${acaoLabel}</button>
         `;
     } else if (type === 'cliente') {
@@ -484,6 +519,10 @@ function openAddModal(type, item = null) {
         const opts = data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
         html = `
             <div class="form-group"><label>Veículo</label><select id="oleoVeiculo" onchange="autoPreencherKm('oleo')">${opts}</select></div>
+            <div class="form-group">
+                <label>Fonte do Óleo</label>
+                <select id="oleoFonte"><option value="comprado">Comprado na hora</option><option value="galao">Galão Próprio (nível atual: ${nivelGalaoOleo().atual.toFixed(1)} L)</option></select>
+            </div>
             <div class="form-row">
                 <div class="form-group"><label>Data</label><input type="date" id="oleoData" value="${v(item,'data')}"></div>
                 <div class="form-group"><label>Tipo</label><input type="text" id="oleoTipo" value="${v(item,'tipo')}" placeholder="Ex: 5W30"></div>
@@ -499,7 +538,7 @@ function openAddModal(type, item = null) {
             <div class="form-group"><label>Valor</label><input type="number" id="oleoValor" step="0.01" value="${v(item,'valor')}"></div>
             <button onclick="addOleo()">${acaoLabel}</button>
         `;
-        posRender = () => { document.getElementById('oleoVeiculo').value = v(item,'veiculo_id'); };
+        posRender = () => { document.getElementById('oleoVeiculo').value = v(item,'veiculo_id'); document.getElementById('oleoFonte').value = v(item,'fonte','comprado'); };
     } else if (type === 'preventiva') {
         modalTitle.textContent = item ? 'Editar Manutenção Preventiva' : 'Adicionar Manutenção Preventiva';
         const opts = data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
@@ -553,6 +592,26 @@ function openAddModal(type, item = null) {
         html = `
             <div class="form-group"><label>Alertar quando o nível estiver abaixo de (litros)</label><input type="number" id="alertaBombaValor" value="${currentEmpresa.bomba_alerta_minimo}"></div>
             <button onclick="salvarAlertaBomba()">Salvar</button>
+        `;
+    } else if (type === 'cargaGalaoOleo') {
+        modalTitle.textContent = item ? 'Editar Carga no Galão de Óleo' : 'Registrar Carga no Galão de Óleo';
+        html = `
+            <div class="form-row">
+                <div class="form-group"><label>Data</label><input type="date" id="cargaGalaoData" value="${v(item,'data')}"></div>
+                <div class="form-group"><label>Tipo de Óleo</label><input type="text" id="cargaGalaoTipo" value="${v(item,'tipo_oleo')}" placeholder="Ex: 5W30"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Litros</label><input type="number" id="cargaGalaoLitros" step="0.01" value="${v(item,'litros')}"></div>
+                <div class="form-group"><label>Valor Total</label><input type="number" id="cargaGalaoValor" step="0.01" value="${v(item,'valor_total')}"></div>
+            </div>
+            <div class="form-group"><label>Fornecedor</label><input type="text" id="cargaGalaoFornecedor" value="${v(item,'fornecedor')}"></div>
+            <button onclick="addCargaGalaoOleo()">${acaoLabel}</button>
+        `;
+    } else if (type === 'alertaGalaoOleo') {
+        modalTitle.textContent = 'Configurar Alerta Mínimo do Galão de Óleo';
+        html = `
+            <div class="form-group"><label>Alertar quando o nível estiver abaixo de (litros)</label><input type="number" id="alertaGalaoValor" value="${currentEmpresa.galao_oleo_alerta_minimo}"></div>
+            <button onclick="salvarAlertaGalaoOleo()">Salvar</button>
         `;
     } else if (type === 'contaPagar') {
         modalTitle.textContent = item ? 'Editar Conta a Pagar' : 'Adicionar Conta a Pagar';
@@ -613,8 +672,13 @@ function openAddModal(type, item = null) {
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Tipo</label><select id="financeiroTipo"><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
-                <div class="form-group"><label>Motivo</label><select id="financeiroMotivo" onchange="tratarNovaCategoria()">${catOpts}<option value="__nova__">+ Nova categoria...</option></select></div>
+                <div class="form-group">
+                    <label>Motivo</label>
+                    <select id="financeiroMotivo" onchange="tratarNovaCategoria()">${catOpts}<option value="__nova__">+ Nova categoria...</option></select>
+                    <button type="button" onclick="gerenciarCategorias()" style="margin-top:5px; background:#ff6b6b; font-size:11px; padding:4px 8px;">🗑️ Gerenciar Categorias</button>
+                </div>
             </div>
+            <div class="form-group"><label>Responsável</label><input type="text" id="financeiroResponsavel" value="${v(item,'responsavel')}" placeholder="Quem é o responsável por esse lançamento"></div>
             <div class="form-group"><label>Descrição</label><textarea id="financeiroDescricao">${v(item,'descricao')}</textarea></div>
             <div class="form-group"><label>Valor</label><input type="number" id="financeiroValor" step="0.01" value="${v(item,'valor')}"></div>
             <button onclick="addFinanceiro()">${acaoLabel}</button>
@@ -666,6 +730,12 @@ function openAddModal(type, item = null) {
                 <div class="form-group"><label>Local de Saída</label><input type="text" id="rotaFixaSaida" value="${v(item,'local_saida')}"></div>
                 <div class="form-group"><label>Local de Chegada</label><input type="text" id="rotaFixaChegada" value="${v(item,'local_chegada')}"></div>
             </div>
+            <p style="font-size:12px; color:#666; margin: 5px 0 10px;">Custo de mão de obra <strong>mensal</strong> dessa rota fixa (recalculado todo mês — some tudo que gasta com motorista/funcionários nela por mês, não por viagem individual):</p>
+            <div class="form-row">
+                <div class="form-group"><label>Valor Mensal do Motorista</label><input type="number" id="rotaFixaValorMotorista" step="0.01" value="${v(item,'valor_motorista',0)}"></div>
+                <div class="form-group"><label>Valor Mensal de Demais Funcionários</label><input type="number" id="rotaFixaValorFuncionarios" step="0.01" value="${v(item,'valor_funcionarios',0)}"></div>
+            </div>
+            <div class="form-group"><label>Valor Mensal de Outros</label><input type="number" id="rotaFixaOutrosValor" step="0.01" value="${v(item,'outros_valor',0)}"></div>
             <button onclick="addRotaFixa()">${acaoLabel}</button>
         `;
     } else if (type === 'produto') {
@@ -761,6 +831,11 @@ function openAddModal(type, item = null) {
         html = `
             <div class="form-group"><label>Veículo</label><select id="simVeiculo">${veiculosOptions}</select></div>
             <div class="form-group"><label>KM previstos para a viagem</label><input type="number" id="simKM"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Valor a Pagar ao Motorista</label><input type="number" id="simValorMotorista" step="0.01" value="0"></div>
+                <div class="form-group"><label>Adiantamento de Viagem</label><input type="number" id="simAdiantamento" step="0.01" value="0"></div>
+            </div>
+            <div class="form-group"><label>Margem de Lucro Desejada (%)</label><input type="number" id="simMargem" value="20"></div>
             <button onclick="simularViagem()">Calcular</button>
             <div id="simResultado"></div>
         `;
@@ -780,6 +855,34 @@ function atualizarCamposFuncionario() {
     document.getElementById('grupoExperiencia').style.display = status === 'experiencia' ? 'flex' : 'none';
 }
 
+function gerenciarCategorias() {
+    document.getElementById('modalTitle').textContent = '🗑️ Gerenciar Categorias';
+    document.getElementById('modalBody').innerHTML = `
+        <p style="font-size:12px; color:#666; margin-bottom:10px;">Excluir uma categoria não apaga os lançamentos que já usam ela — só remove da lista de opções pra novos lançamentos.</p>
+        <div id="listaCategoriasGerenciar"></div>
+        <button onclick="openAddModal('financeiro', editContext ? data.financeiro.find(f=>f.id===editContext.id) : null)" style="margin-top:15px;">Voltar</button>
+    `;
+    document.getElementById('modal').classList.add('active');
+    renderListaCategoriasGerenciar();
+}
+
+function renderListaCategoriasGerenciar() {
+    document.getElementById('listaCategoriasGerenciar').innerHTML = data.financeiro_categorias.map(c => `
+        <div class="gasto-item">
+            <div class="gasto-info"><h4>${c.nome}</h4></div>
+            <button class="btn-small" onclick="excluirCategoriaFinanceira('${c.id}')">Excluir</button>
+        </div>`).join('') || '<p style="color:#666;">Nenhuma categoria cadastrada.</p>';
+}
+
+async function excluirCategoriaFinanceira(id) {
+    if (!confirm('Excluir essa categoria da lista? Lançamentos que já usam ela continuam normais.')) return;
+    const { error } = await sb.from('financeiro_categorias').delete().eq('id', id);
+    if (error) { alertErro(error); return; }
+    data.financeiro_categorias = data.financeiro_categorias.filter(c => c.id !== id);
+    renderListaCategoriasGerenciar();
+    preencherFiltroMotivo();
+}
+
 async function tratarNovaCategoria() {
     const sel = document.getElementById('financeiroMotivo');
     if (sel.value !== '__nova__') return;
@@ -788,10 +891,9 @@ async function tratarNovaCategoria() {
     const { error } = await sb.from('financeiro_categorias').insert({ empresa_id: currentEmpresa.id, nome: novaCategoria });
     if (error) { alertErro(error); sel.value = data.financeiro_categorias[0]?.nome || ''; return; }
     data.financeiro_categorias.push({ nome: novaCategoria });
-    const opt = document.createElement('option');
-    opt.value = novaCategoria;
-    opt.textContent = novaCategoria;
-    sel.insertBefore(opt, sel.querySelector('option[value="__nova__"]'));
+    data.financeiro_categorias.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+    const catOpts = data.financeiro_categorias.map(c => `<option value="${c.nome}">${c.nome}</option>`).join('');
+    sel.innerHTML = catOpts + '<option value="__nova__">+ Nova categoria...</option>';
     sel.value = novaCategoria;
     preencherFiltroMotivo();
 }
@@ -811,6 +913,9 @@ function calcularValorTotalPneu() {
 function simularViagem() {
     const veiculoId = document.getElementById('simVeiculo').value;
     const km = parseFloat(document.getElementById('simKM').value);
+    const valorMotorista = parseFloat(document.getElementById('simValorMotorista').value) || 0;
+    const adiantamento = parseFloat(document.getElementById('simAdiantamento').value) || 0;
+    const margem = parseFloat(document.getElementById('simMargem').value) || 0;
     if (!veiculoId || !km) { alert('Selecione o veículo e informe o KM'); return; }
     const custoKm = custoPorKmVeiculo(veiculoId);
     const veiculo = data.veiculos.find(vv => vv.id === veiculoId);
@@ -818,13 +923,22 @@ function simularViagem() {
         document.getElementById('simResultado').innerHTML = `<div class="sim-result"><h3>Sem dados suficientes</h3><p>Esse veículo ainda não tem rotas + gastos registrados para calcular um custo/km histórico.</p></div>`;
         return;
     }
-    const despesaEstimada = custoKm * km;
+    const despesaVeiculo = custoKm * km;
+    const custoTotal = despesaVeiculo + valorMotorista + adiantamento;
+    const valorSugerido = custoTotal * (1 + margem / 100);
+    const lucroEstimado = valorSugerido - custoTotal;
+
     document.getElementById('simResultado').innerHTML = `
         <div class="sim-result">
             <h3>Estimativa para ${veiculo.placa}</h3>
             <p><strong>Custo histórico por KM:</strong> R$ ${custoKm.toFixed(2)}/km</p>
             <p><strong>KM da viagem:</strong> ${km} km</p>
-            <p style="font-size:20px; margin-top:10px;"><strong>Despesa estimada:</strong> R$ ${despesaEstimada.toFixed(2)}</p>
+            <p><strong>Despesa do veículo (combustível/manutenção):</strong> R$ ${despesaVeiculo.toFixed(2)}</p>
+            <p><strong>Valor ao motorista:</strong> R$ ${valorMotorista.toFixed(2)}</p>
+            <p><strong>Adiantamento de viagem:</strong> R$ ${adiantamento.toFixed(2)}</p>
+            <p style="font-size:16px; margin-top:8px;"><strong>Custo Total:</strong> R$ ${custoTotal.toFixed(2)}</p>
+            <p style="font-size:22px; margin-top:10px; color:#0066cc;"><strong>Valor Sugerido (com ${margem}% de margem):</strong> R$ ${valorSugerido.toFixed(2)}</p>
+            <p style="font-size:14px; color:#4caf50;"><strong>Lucro estimado:</strong> R$ ${lucroEstimado.toFixed(2)}</p>
         </div>`;
 }
 
@@ -883,12 +997,15 @@ async function addVeiculo() {
     const chassi = document.getElementById('veiculoChassi').value;
     const renavam = document.getElementById('veiculoRenavam').value;
     const km_atual = parseFloat(document.getElementById('veiculoKmAtual').value) || 0;
+    const numero_bancos = parseInt(document.getElementById('veiculoNumeroBancos').value) || null;
     const csv_validade = document.getElementById('veiculoCsvValidade').value || null;
+    const csv_valor = parseFloat(document.getElementById('veiculoCsvValor').value) || null;
     const tacografo_validade = document.getElementById('veiculoTacografoValidade').value || null;
     const apolice_validade = document.getElementById('veiculoApoliceValidade').value || null;
+    const apolice_valor = parseFloat(document.getElementById('veiculoApoliceValor').value) || null;
     const crlv_ano = document.getElementById('veiculoCrlvAno').value || null;
     if (!placa || !marca || !modelo || !ano) { alert('Preencha placa, marca, modelo e ano'); return; }
-    const payload = { placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual, csv_validade, tacografo_validade, apolice_validade, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null };
+    const payload = { placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual, numero_bancos, csv_validade, csv_valor, tacografo_validade, apolice_validade, apolice_valor, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null };
     const { error } = isEdit
         ? await sb.from('veiculos').update(payload).eq('id', editContext.id)
         : await sb.from('veiculos').insert({ empresa_id: currentEmpresa.id, ...payload });
@@ -907,8 +1024,7 @@ async function addCliente() {
     const cidade = document.getElementById('clienteCidade').value;
     const uf = document.getElementById('clienteUf').value;
     const cep = document.getElementById('clienteCep').value;
-    const data_nascimento = document.getElementById('clienteDataNasc').value;
-    if (!nome || !cpf_cnpj || !telefone || !rua || !data_nascimento) { alert('Preencha ao menos nome, CPF/CNPJ, telefone, rua e nascimento'); return; }
+    const data_nascimento = document.getElementById('clienteDataNasc').value || null;
     const payload = { nome, cpf_cnpj, telefone, rua, numero, bairro, cidade, uf, cep, data_nascimento };
     const { error } = isEdit
         ? await sb.from('clientes').update(payload).eq('id', editContext.id)
@@ -970,6 +1086,7 @@ async function addPneu() {
 async function addOleo() {
     const isEdit = editContext && editContext.type === 'oleo';
     const veiculo_id = document.getElementById('oleoVeiculo').value;
+    const fonte = document.getElementById('oleoFonte').value;
     const data_oleo = document.getElementById('oleoData').value;
     const tipo = document.getElementById('oleoTipo').value;
     const lugar = document.getElementById('oleoLugar').value;
@@ -978,7 +1095,15 @@ async function addOleo() {
     const valor = parseFloat(document.getElementById('oleoValor').value);
     const km_proxima = parseFloat(document.getElementById('oleoKMProxima').value);
     if (!veiculo_id || !data_oleo || !tipo || !km_atual || !valor || !km_proxima) { alert('Preencha todos os campos obrigatórios'); return; }
-    const payload = { veiculo_id, data: data_oleo, tipo, lugar, litragem, km_atual, valor, km_proxima };
+
+    if (fonte === 'galao' && !isEdit && litragem) {
+        const nivel = nivelGalaoOleo();
+        if (litragem > nivel.atual) {
+            if (!confirm(`O galão só tem ${nivel.atual.toFixed(1)} L disponíveis. Isso vai deixar o nível negativo. Continuar mesmo assim?`)) return;
+        }
+    }
+
+    const payload = { veiculo_id, fonte, data: data_oleo, tipo, lugar, litragem, km_atual, valor, km_proxima };
     const { error } = isEdit
         ? await sb.from('oleos').update(payload).eq('id', editContext.id)
         : await sb.from('oleos').insert({ empresa_id: currentEmpresa.id, ...payload });
@@ -1043,6 +1168,31 @@ async function salvarAlertaBomba() {
     if (error) { alertErro(error); return; }
     currentEmpresa.bomba_alerta_minimo = valor;
     closeModal(); loadBomba();
+}
+
+async function addCargaGalaoOleo() {
+    const isEdit = editContext && editContext.type === 'cargaGalaoOleo';
+    const data_carga = document.getElementById('cargaGalaoData').value;
+    const tipo_oleo = document.getElementById('cargaGalaoTipo').value;
+    const litros = parseFloat(document.getElementById('cargaGalaoLitros').value);
+    const valor_total = parseFloat(document.getElementById('cargaGalaoValor').value);
+    const fornecedor = document.getElementById('cargaGalaoFornecedor').value;
+    if (!data_carga || !litros || !valor_total) { alert('Preencha data, litros e valor total'); return; }
+    const payload = { data: data_carga, tipo_oleo, litros, valor_total, fornecedor };
+    const { error } = isEdit
+        ? await sb.from('galao_oleo_cargas').update(payload).eq('id', editContext.id)
+        : await sb.from('galao_oleo_cargas').insert({ empresa_id: currentEmpresa.id, ...payload });
+    if (error) { alertErro(error); return; }
+    closeModal(); await loadData(); loadGalaoOleo(); updateDashboard();
+}
+
+async function salvarAlertaGalaoOleo() {
+    const valor = parseFloat(document.getElementById('alertaGalaoValor').value);
+    if (isNaN(valor)) { alert('Informe um número válido'); return; }
+    const { error } = await sb.from('empresas').update({ galao_oleo_alerta_minimo: valor }).eq('id', currentEmpresa.id);
+    if (error) { alertErro(error); return; }
+    currentEmpresa.galao_oleo_alerta_minimo = valor;
+    closeModal(); loadGalaoOleo();
 }
 
 async function addContaPagar() {
@@ -1154,6 +1304,7 @@ async function addFinanceiro() {
     const banco_id = document.getElementById('financeiroBanco').value;
     const tipo = document.getElementById('financeiroTipo').value;
     let motivo = document.getElementById('financeiroMotivo').value;
+    const responsavel = document.getElementById('financeiroResponsavel').value;
     const descricao = document.getElementById('financeiroDescricao').value;
     const valor = parseFloat(document.getElementById('financeiroValor').value);
 
@@ -1178,7 +1329,7 @@ async function addFinanceiro() {
         }
     }
 
-    const payload = { banco_id, data: data_fin, tipo, motivo, descricao, valor };
+    const payload = { banco_id, data: data_fin, tipo, motivo, responsavel, descricao, valor };
     const { error } = isEdit
         ? await sb.from('financeiro').update(payload).eq('id', editContext.id)
         : await sb.from('financeiro').insert({ empresa_id: currentEmpresa.id, ...payload });
@@ -1220,8 +1371,11 @@ async function addRotaFixa() {
     const nome = document.getElementById('rotaFixaNome').value;
     const local_saida = document.getElementById('rotaFixaSaida').value;
     const local_chegada = document.getElementById('rotaFixaChegada').value;
+    const valor_motorista = parseFloat(document.getElementById('rotaFixaValorMotorista').value) || 0;
+    const valor_funcionarios = parseFloat(document.getElementById('rotaFixaValorFuncionarios').value) || 0;
+    const outros_valor = parseFloat(document.getElementById('rotaFixaOutrosValor').value) || 0;
     if (!nome) { alert('Informe o nome da rota fixa'); return; }
-    const payload = { nome, local_saida, local_chegada };
+    const payload = { nome, local_saida, local_chegada, valor_motorista, valor_funcionarios, outros_valor };
     const { error } = isEdit
         ? await sb.from('rotas_fixas').update(payload).eq('id', editContext.id)
         : await sb.from('rotas_fixas').insert({ empresa_id: currentEmpresa.id, ...payload });
@@ -1390,6 +1544,7 @@ function loadFuncionarios() {
 function loadVeiculos() {
     document.getElementById('veiculosTable').innerHTML = data.veiculos.map(vv => `
         <tr><td>${vv.placa}</td><td>${vv.marca}</td><td>${vv.modelo}</td><td>${vv.ano}</td><td>${vv.chassi||'-'}</td><td>${vv.renavam||'-'}</td>
+        <td>${vv.numero_bancos || '-'}</td>
         <td>${Number(vv.km_atual||0).toLocaleString('pt-BR')} km</td>
         <td>${vv.csv_validade ? formatarData(vv.csv_validade) : '-'}</td>
         <td>${vv.tacografo_validade ? formatarData(vv.tacografo_validade) : '-'}</td>
@@ -1593,6 +1748,29 @@ function loadBomba() {
         </td></tr>`).join('');
 }
 
+function loadGalaoOleo() {
+    const nivel = nivelGalaoOleo();
+    const alerta = nivel.atual <= currentEmpresa.galao_oleo_alerta_minimo;
+    document.getElementById('galaoNivelValor').textContent = `${nivel.atual.toFixed(1)} L`;
+    document.getElementById('galaoNivelValor').className = 'bomba-nivel' + (alerta ? ' alerta' : '');
+    document.getElementById('galaoAlertaTexto').style.display = alerta ? 'block' : 'none';
+    const pct = nivel.totalCarregado > 0 ? Math.max(0, Math.min(100, (nivel.atual / nivel.totalCarregado) * 100)) : 0;
+    const fill = document.getElementById('galaoBarraFill');
+    fill.style.width = pct + '%';
+    fill.className = 'bomba-barra-fill' + (alerta ? ' alerta' : '');
+    document.getElementById('galaoTotalCarregado').textContent = `${nivel.totalCarregado.toFixed(1)} L`;
+    document.getElementById('galaoTotalDispensado').textContent = `${nivel.totalDispensado.toFixed(1)} L`;
+    document.getElementById('galaoGastoTotal').textContent = `R$ ${nivel.gastoTotal.toFixed(2)}`;
+
+    document.getElementById('galaoCargasTable').innerHTML = data.galao_oleo_cargas.map(c => `
+        <tr><td>${formatarData(c.data)}</td><td>${c.tipo_oleo||'-'}</td><td>${Number(c.litros).toFixed(1)} L</td>
+        <td>R$ ${Number(c.valor_total).toFixed(2)}</td><td>${c.fornecedor||'-'}</td>
+        <td>
+            <button class="btn-small" style="background:#0066cc;" onclick="editarItem('galao_oleo_cargas','${c.id}','cargaGalaoOleo')">Editar</button>
+            <button class="btn-small" onclick="deleteItem('galao_oleo_cargas', '${c.id}')">Deletar</button>
+        </td></tr>`).join('');
+}
+
 function loadMultas() {
     document.getElementById('multasTable').innerHTML = data.multas.map(m => `
         <tr><td>${veiculoPlaca(m.veiculo_id)}</td><td>${formatarData(m.data)}</td>
@@ -1626,25 +1804,40 @@ function loadFinanceiro() {
 function loadRotas() {
     preencherFiltrosRotas();
     filtrarRotas();
+    loadRotasFixasLista();
 }
 
 function preencherFiltrosRotas() {
+    const selVeiculo = document.getElementById('filtroRotasVeiculo');
     const selFixa = document.getElementById('filtroRotasFixa');
     const selMotorista = document.getElementById('filtroRotasMotorista');
-    if (!selFixa || !selMotorista) return;
-    const atualFixa = selFixa.value, atualMotorista = selMotorista.value;
+    if (!selFixa || !selMotorista || !selVeiculo) return;
+    const atualVeiculo = selVeiculo.value, atualFixa = selFixa.value, atualMotorista = selMotorista.value;
+    selVeiculo.innerHTML = '<option value="">Todos</option>' + data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
     selFixa.innerHTML = '<option value="">Todas</option>' + data.rotas_fixas.map(rf => `<option value="${rf.id}">${rf.nome}</option>`).join('');
     selMotorista.innerHTML = '<option value="">Todos</option>' + data.motoristas.map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
+    selVeiculo.value = atualVeiculo;
     selFixa.value = atualFixa;
     selMotorista.value = atualMotorista;
 }
 
 function filtrarRotas() {
+    const veiculoId = document.getElementById('filtroRotasVeiculo')?.value || '';
     const rotaFixaId = document.getElementById('filtroRotasFixa')?.value || '';
     const motoristaId = document.getElementById('filtroRotasMotorista')?.value || '';
+    const dataInicio = document.getElementById('filtroRotasDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroRotasDataFim')?.value || '';
+
+    if (!veiculoId && !rotaFixaId && !motoristaId && !dataInicio && !dataFim) {
+        document.getElementById('rotasTable').innerHTML = '<tr><td colspan="10" style="color:#666; text-align:center; padding:20px;">Use os filtros acima (veículo, rota fixa, motorista ou data) pra ver as rotas. Isso evita carregar tudo de uma vez.</td></tr>';
+        return;
+    }
+
     let filtrado = data.rotas;
+    if (veiculoId) filtrado = filtrado.filter(r => r.veiculo_id === veiculoId);
     if (rotaFixaId) filtrado = filtrado.filter(r => r.rota_fixa_id === rotaFixaId);
     if (motoristaId) filtrado = filtrado.filter(r => r.motorista_id === motoristaId);
+    filtrado = filtrarPorData(filtrado, 'data_inicio', dataInicio, dataFim);
 
     document.getElementById('rotasTable').innerHTML = filtrado.map(r => `
         <tr><td>${veiculoPlaca(r.veiculo_id)}</td><td>${motoristaNome(r.motorista_id)}</td>
@@ -1656,13 +1849,27 @@ function filtrarRotas() {
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('rotas','${r.id}','rota')">Editar</button>
             <button class="btn-small" onclick="deleteItem('rotas', '${r.id}')">Deletar</button>
-        </td></tr>`).join('');
+        </td></tr>`).join('') || '<tr><td colspan="10" style="color:#666; text-align:center; padding:20px;">Nenhuma rota encontrada com esses filtros.</td></tr>';
 }
 
 function limparFiltrosRotas() {
+    document.getElementById('filtroRotasVeiculo').value = '';
     document.getElementById('filtroRotasFixa').value = '';
     document.getElementById('filtroRotasMotorista').value = '';
+    document.getElementById('filtroRotasDataInicio').value = '';
+    document.getElementById('filtroRotasDataFim').value = '';
     filtrarRotas();
+}
+
+function loadRotasFixasLista() {
+    const tbody = document.getElementById('rotasFixasListaTable');
+    if (!tbody) return;
+    tbody.innerHTML = data.rotas_fixas.map(rf => `
+        <tr><td>${rf.nome}</td><td>${rf.local_saida||'-'}</td><td>${rf.local_chegada||'-'}</td>
+        <td>
+            <button class="btn-small" style="background:#0066cc;" onclick="editarItem('rotas_fixas','${rf.id}','rotaFixa')">Editar</button>
+            <button class="btn-small" onclick="deleteItem('rotas_fixas', '${rf.id}')">Deletar</button>
+        </td></tr>`).join('') || '<tr><td colspan="4" style="color:#666;">Nenhuma rota fixa cadastrada ainda.</td></tr>';
 }
 
 function loadProdutos() {
@@ -1716,8 +1923,8 @@ function filtrarTurismo() {
     const dataFim = document.getElementById('filtroTurismoDataFim').value;
     const clienteId = document.getElementById('filtroTurismoCliente').value;
     let filtrado = data.turismo_viagens;
-    if (dataInicio) filtrado = filtrado.filter(vv => new Date(vv.data) >= new Date(dataInicio));
-    if (dataFim) filtrado = filtrado.filter(vv => new Date(vv.data) <= new Date(dataFim));
+    if (dataInicio) filtrado = filtrado.filter(vv => parseDataLocal(vv.data) >= parseDataLocal(dataInicio));
+    if (dataFim) filtrado = filtrado.filter(vv => parseDataLocal(vv.data) <= parseDataLocal(dataFim));
     if (clienteId) filtrado = filtrado.filter(vv => vv.cliente_id === clienteId);
     document.getElementById('turismoTable').innerHTML = filtrado.map(vg => {
         const gastoVeiculo = vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0;
@@ -1820,6 +2027,57 @@ function renderRotasFixasPerformance() {
 }
 
 function toggleSubList(id) { document.getElementById(id).classList.toggle('open'); }
+
+function gerarCustosVeiculos() {
+    document.getElementById('custosVeiculosTable').innerHTML = data.veiculos.map(vv => {
+        const kmTotal = data.rotas.filter(r => r.veiculo_id === vv.id).reduce((s,r) => s + kmPercorrido(r), 0);
+        const combustivel = data.abastecimentos.filter(a => a.veiculo_id === vv.id).reduce((s,a) => s + Number(a.valor_total), 0);
+        const pneus = data.pneus.filter(p => p.veiculo_id === vv.id).reduce((s,p) => s + Number(p.valor||0), 0);
+        const oleo = data.oleos.filter(o => o.veiculo_id === vv.id).reduce((s,o) => s + Number(o.valor||0), 0);
+        const preventiva = data.preventivas.filter(p => p.veiculo_id === vv.id).reduce((s,p) => s + Number(p.valor||0), 0);
+        const corretiva = data.corretivas.filter(c => c.veiculo_id === vv.id).reduce((s,c) => s + Number(c.valor||0), 0);
+        const multas = data.multas.filter(m => m.veiculo_id === vv.id).reduce((s,m) => s + Number(m.valor||0), 0);
+        const meses = mesesOperacaoVeiculo(vv.id);
+        const seguroCsv = ((Number(vv.apolice_valor||0) + Number(vv.csv_valor||0)) / 12) * meses;
+        const total = combustivel + pneus + oleo + preventiva + corretiva + multas + seguroCsv;
+        const custoKm = kmTotal > 0 ? (total / kmTotal).toFixed(2) : '-';
+        return `<tr><td>${vv.placa}</td><td>${vv.numero_bancos || '-'}</td><td>${kmTotal} km</td>
+        <td>R$ ${combustivel.toFixed(2)}</td><td>R$ ${pneus.toFixed(2)}</td><td>R$ ${oleo.toFixed(2)}</td>
+        <td>R$ ${preventiva.toFixed(2)}</td><td>R$ ${corretiva.toFixed(2)}</td><td>R$ ${multas.toFixed(2)}</td>
+        <td>R$ ${seguroCsv.toFixed(2)}</td>
+        <td><strong>R$ ${total.toFixed(2)}</strong></td><td>R$ ${custoKm}/km</td></tr>`;
+    }).join('');
+
+    preencherSelectVeiculo('filtroCustoRealVeiculo');
+    gerarCustoPorRotaFixa();
+}
+
+function mesesOperacaoRotaFixa(rotaFixaId) {
+    const datasRotas = data.rotas.filter(r => r.rota_fixa_id === rotaFixaId && r.data_inicio).map(r => parseDataLocal(r.data_inicio));
+    if (datasRotas.length === 0) return 1;
+    const min = new Date(Math.min(...datasRotas));
+    const max = new Date(Math.max(...datasRotas));
+    const meses = (max.getFullYear() - min.getFullYear()) * 12 + (max.getMonth() - min.getMonth()) + 1;
+    return Math.max(1, meses);
+}
+
+function gerarCustoPorRotaFixa() {
+    document.getElementById('custoPorRotaFixaTable').innerHTML = data.rotas_fixas.map(rf => {
+        const instancias = data.rotas.filter(r => r.rota_fixa_id === rf.id);
+        const kmTotal = instancias.reduce((s,r) => s + kmPercorrido(r), 0);
+        const custoVeiculoHistorico = instancias.reduce((s,r) => s + custoPorKmVeiculo(r.veiculo_id) * kmPercorrido(r), 0);
+        const maoDeObraMensal = Number(rf.valor_motorista||0) + Number(rf.valor_funcionarios||0) + Number(rf.outros_valor||0);
+        const meses = mesesOperacaoRotaFixa(rf.id);
+        const maoDeObraTotal = maoDeObraMensal * meses;
+        const custoTotal = custoVeiculoHistorico + maoDeObraTotal;
+        const custoRealPorKm = kmTotal > 0 ? custoTotal / kmTotal : 0;
+        return `<tr><td>${rf.nome}</td><td>${rf.local_saida||'-'} → ${rf.local_chegada||'-'}</td>
+        <td>${instancias.length}</td><td>${kmTotal} km</td>
+        <td>R$ ${custoVeiculoHistorico.toFixed(2)}</td><td>R$ ${maoDeObraMensal.toFixed(2)}/mês</td><td>${meses}</td>
+        <td>R$ ${maoDeObraTotal.toFixed(2)}</td>
+        <td><strong>R$ ${custoTotal.toFixed(2)}</strong></td><td><strong>R$ ${custoRealPorKm.toFixed(2)}/km</strong></td></tr>`;
+    }).join('') || '<tr><td colspan="10" style="color:#666;">Nenhuma rota fixa cadastrada. Vá em Rotas → "Nova Rota Fixa" e preencha os valores mensais de mão de obra.</td></tr>';
+}
 
 function limparFiltroMedias() {
     document.getElementById('filtroMediasVeiculo').value = '';
@@ -2074,14 +2332,18 @@ function filtrarFinanceiro() {
     const dataFim = document.getElementById('filtroDataFim').value;
     const tipo = document.getElementById('filtroTipo').value;
     const motivo = document.getElementById('filtroMotivo').value;
+    const bancoId = document.getElementById('filtroBanco').value;
+    const responsavel = document.getElementById('filtroResponsavel')?.value || '';
     let filtrado = data.financeiro;
-    if (dataInicio) filtrado = filtrado.filter(f => new Date(f.data) >= new Date(dataInicio));
-    if (dataFim) filtrado = filtrado.filter(f => new Date(f.data) <= new Date(dataFim));
+    if (dataInicio) filtrado = filtrado.filter(f => parseDataLocal(f.data) >= parseDataLocal(dataInicio));
+    if (dataFim) filtrado = filtrado.filter(f => parseDataLocal(f.data) <= parseDataLocal(dataFim));
     if (tipo) filtrado = filtrado.filter(f => f.tipo === tipo);
     if (motivo) filtrado = filtrado.filter(f => f.motivo === motivo);
+    if (bancoId) filtrado = filtrado.filter(f => f.banco_id === bancoId);
+    if (responsavel) filtrado = filtrado.filter(f => f.responsavel === responsavel);
     document.getElementById('financeiroTable').innerHTML = filtrado.map(f => `
         <tr><td>${formatarData(f.data)}</td><td>${data.bancos.find(b=>b.id===f.banco_id)?.nome || 'N/A'}</td>
-        <td>${f.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td><td>${f.motivo}</td><td>${f.descricao||''}</td>
+        <td>${f.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td><td>${f.motivo}</td><td>${f.responsavel||'-'}</td><td>${f.descricao||''}</td>
         <td>R$ ${Number(f.valor).toFixed(2)}</td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('financeiro','${f.id}','financeiro')">Editar</button>
@@ -2094,6 +2356,8 @@ function limparFiltros() {
     document.getElementById('filtroDataFim').value = '';
     document.getElementById('filtroTipo').value = '';
     document.getElementById('filtroMotivo').value = '';
+    document.getElementById('filtroBanco').value = '';
+    document.getElementById('filtroResponsavel').value = '';
     loadFinanceiro();
 }
 
@@ -2103,6 +2367,21 @@ function preencherFiltroMotivo() {
     const atual = sel.value;
     sel.innerHTML = '<option value="">Todos</option>' + data.financeiro_categorias.map(c => `<option value="${c.nome}">${c.nome}</option>`).join('');
     sel.value = atual;
+
+    const selBanco = document.getElementById('filtroBanco');
+    if (selBanco) {
+        const atualBanco = selBanco.value;
+        selBanco.innerHTML = '<option value="">Todos</option>' + data.bancos.map(b => `<option value="${b.id}">${b.nome}</option>`).join('');
+        selBanco.value = atualBanco;
+    }
+
+    const selResp = document.getElementById('filtroResponsavel');
+    if (selResp) {
+        const atualResp = selResp.value;
+        const responsaveis = [...new Set(data.financeiro.map(f => f.responsavel).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'pt-BR'));
+        selResp.innerHTML = '<option value="">Todos</option>' + responsaveis.map(r => `<option value="${r}">${r}</option>`).join('');
+        selResp.value = atualResp;
+    }
 }
 
 function gerarRelatorio() {
@@ -2116,7 +2395,7 @@ function gerarRelatorio() {
 
     let totalEntrada = 0, totalSaida = 0;
     data.financeiro.forEach(f => {
-        const dataF = new Date(f.data);
+        const dataF = parseDataLocal(f.data);
         if (dataF >= dataInicio && dataF <= dataFim) { if (f.tipo === 'entrada') totalEntrada += Number(f.valor); else totalSaida += Number(f.valor); }
     });
     const saldo = totalEntrada - totalSaida;
@@ -2132,7 +2411,7 @@ function gerarRelatorio() {
             meses.push(mes.toLocaleDateString('pt-BR',{month:'short'}));
             let entrada=0, saida=0;
             data.financeiro.forEach(f => {
-                const dataF = new Date(f.data);
+                const dataF = parseDataLocal(f.data);
                 if (dataF.getMonth()===i && dataF.getFullYear()===hoje.getFullYear()) { if (f.tipo==='entrada') entrada+=Number(f.valor); else saida+=Number(f.valor); }
             });
             entradas.push(entrada); saidas.push(saida);
@@ -2216,13 +2495,14 @@ async function loadData() {
     const empresaId = currentEmpresa.id;
     const tabelas = ['motoristas','funcionarios','veiculos','clientes','abastecimentos','pneus','oleos',
                       'preventivas','corretivas','multas','bancos','financeiro','rotas','produtos','estoque_movimentacoes',
-                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas','contas_pagar','contas_receber'];
+                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas','contas_pagar','contas_receber','galao_oleo_cargas'];
 
     const resultados = await Promise.all(tabelas.map(t => sb.from(t).select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false })));
     resultados.forEach((res, i) => {
         if (res.error) { console.error(`Erro ao carregar ${tabelas[i]}:`, res.error); data[tabelas[i]] = []; }
         else { data[tabelas[i]] = res.data; }
     });
+    data.financeiro_categorias.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 
     loadMotoristas(); loadFuncionarios(); loadVeiculos(); loadClientes();
     loadAbastecimentos(); loadPneus(); loadOleos(); loadPreventivas(); loadCorretivas(); loadMultas();
@@ -2231,6 +2511,7 @@ async function loadData() {
     loadContasPagar();
     loadContasReceber();
     loadBomba();
+    loadGalaoOleo();
     preencherFiltroClientesTurismo(); filtrarTurismo();
     preencherFiltroRotas(); gerarRelatorioRotas();
     preencherFiltroMotivo();

@@ -126,7 +126,7 @@
                         <button class="btn-excel" onclick="exportarExcel('veiculos')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>KM Atual</th><th>Val. CSV</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>Bancos</th><th>KM Atual</th><th>Val. CSV</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
                         <tbody id="veiculosTable"></tbody>
                     </table>
                 </div>
@@ -154,6 +154,7 @@
                         <button class="tab" onclick="switchTab('preventiva')">🔧 Preventiva</button>
                         <button class="tab" onclick="switchTab('corretiva')">🛠️ Corretiva</button>
                         <button class="tab" onclick="switchTab('bomba')">⛽📊 Bomba de Combustível</button>
+                        <button class="tab" onclick="switchTab('galaoOleo')">🛢️📊 Galão de Óleo</button>
                         <button class="tab" onclick="switchTab('mediasManutencao')">📊 Relatório de Médias</button>
                     </div>
 
@@ -262,6 +263,29 @@
                         <table>
                             <thead><tr><th>Data</th><th>Litros</th><th>Valor Total</th><th>Fornecedor</th><th>Ações</th></tr></thead>
                             <tbody id="bombaCargasTable"></tbody>
+                        </table>
+                    </div>
+
+                    <div id="galaoOleo" class="tab-content">
+                        <div class="bomba-card">
+                            <p style="color:#666;">Nível atual do galão de óleo</p>
+                            <div class="bomba-nivel" id="galaoNivelValor">0 L</div>
+                            <div class="bomba-barra"><div class="bomba-barra-fill" id="galaoBarraFill" style="width:0%;"></div></div>
+                            <p id="galaoAlertaTexto" style="color:#ff6b6b; font-weight:600; display:none;">⚠️ Nível abaixo do mínimo configurado!</p>
+                            <div class="performance-stats" style="margin-top:15px;">
+                                <div class="stat"><div class="stat-value" id="galaoTotalCarregado">0 L</div><div class="stat-label">Total Já Carregado</div></div>
+                                <div class="stat"><div class="stat-value" id="galaoTotalDispensado">0 L</div><div class="stat-label">Total Dispensado</div></div>
+                                <div class="stat"><div class="stat-value" id="galaoGastoTotal">R$ 0</div><div class="stat-label">Gasto Total nas Cargas</div></div>
+                            </div>
+                        </div>
+                        <div class="btn-row">
+                            <button onclick="openAddModal('cargaGalaoOleo')">+ Registrar Carga no Galão</button>
+                            <button onclick="openAddModal('alertaGalaoOleo')">⚙️ Configurar Alerta Mínimo</button>
+                            <button class="btn-excel" onclick="exportarExcel('galao_oleo_cargas')">📥 Exportar Excel</button>
+                        </div>
+                        <table>
+                            <thead><tr><th>Data</th><th>Tipo</th><th>Litros</th><th>Valor Total</th><th>Fornecedor</th><th>Ações</th></tr></thead>
+                            <tbody id="galaoCargasTable"></tbody>
                         </table>
                     </div>
 
@@ -376,6 +400,8 @@
                             <div class="filter-group"><label>Data Final</label><input type="date" id="filtroDataFim" onchange="filtrarFinanceiro()"></div>
                             <div class="filter-group"><label>Tipo</label><select id="filtroTipo" onchange="filtrarFinanceiro()"><option value="">Todos</option><option value="entrada">Entrada</option><option value="saida">Saída</option></select></div>
                             <div class="filter-group"><label>Motivo</label><select id="filtroMotivo" onchange="filtrarFinanceiro()"><option value="">Todos</option></select></div>
+                            <div class="filter-group"><label>Banco</label><select id="filtroBanco" onchange="filtrarFinanceiro()"><option value="">Todos</option></select></div>
+                            <div class="filter-group"><label>Responsável</label><select id="filtroResponsavel" onchange="filtrarFinanceiro()"><option value="">Todos</option></select></div>
                             <button onclick="limparFiltros()">Limpar Filtros</button>
                         </div>
                         <div class="btn-row">
@@ -383,7 +409,7 @@
                             <button class="btn-excel" onclick="exportarExcel('financeiro')">📥 Exportar Excel</button>
                         </div>
                         <table>
-                            <thead><tr><th>Data</th><th>Banco</th><th>Tipo</th><th>Motivo</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead>
+                            <thead><tr><th>Data</th><th>Banco</th><th>Tipo</th><th>Motivo</th><th>Responsável</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="financeiroTable"></tbody>
                         </table>
                     </div>
@@ -420,13 +446,22 @@
                         <button class="btn-excel" onclick="exportarExcel('rotas')">📥 Exportar Excel</button>
                     </div>
                     <div class="filters">
+                        <div class="filter-group"><label>Veículo</label><select id="filtroRotasVeiculo" onchange="filtrarRotas()"><option value="">Todos</option></select></div>
                         <div class="filter-group"><label>Rota Fixa</label><select id="filtroRotasFixa" onchange="filtrarRotas()"><option value="">Todas</option></select></div>
                         <div class="filter-group"><label>Motorista</label><select id="filtroRotasMotorista" onchange="filtrarRotas()"><option value="">Todos</option></select></div>
+                        <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroRotasDataInicio" onchange="filtrarRotas()"></div>
+                        <div class="filter-group"><label>Data Final</label><input type="date" id="filtroRotasDataFim" onchange="filtrarRotas()"></div>
                         <button onclick="limparFiltrosRotas()">Limpar Filtros</button>
                     </div>
                     <table>
                         <thead><tr><th>Veículo</th><th>Motorista</th><th>Saída</th><th>Destino</th><th>Rota Fixa</th><th>Início</th><th>Fim</th><th>KM</th><th>Tempo</th><th>Ações</th></tr></thead>
                         <tbody id="rotasTable"></tbody>
+                    </table>
+
+                    <h3 style="margin-top: 30px;">📌 Rotas Fixas Cadastradas</h3>
+                    <table>
+                        <thead><tr><th>Nome</th><th>Local de Saída</th><th>Local de Chegada</th><th>Ações</th></tr></thead>
+                        <tbody id="rotasFixasListaTable"></tbody>
                     </table>
                 </div>
 
@@ -437,10 +472,26 @@
                         <button class="tab active" onclick="switchTab('desempenhoGeral')">📈 Geral</button>
                         <button class="tab" onclick="switchTab('desempenhoConjunto')">🚗👨‍✈️ Desempenho Conjunto</button>
                         <button class="tab" onclick="switchTab('desempenhoRotaFixa')">📌 Rotas Fixas</button>
+                        <button class="tab" onclick="switchTab('custosVeiculos')">💲 Custos & Precificação</button>
                     </div>
                     <div id="desempenhoGeral" class="tab-content active"></div>
                     <div id="desempenhoConjunto" class="tab-content"></div>
                     <div id="desempenhoRotaFixa" class="tab-content"></div>
+                    <div id="custosVeiculos" class="tab-content">
+                        <h3>💰 Custo por KM de Cada Veículo</h3>
+                        <p style="font-size:12px; color:#666; margin-bottom:10px;">Soma de todas as despesas do veículo (combustível, pneus, óleo, preventiva, corretiva, multas, seguro/CSV rateado) dividida pelo total de KM rodado em rotas.</p>
+                        <table>
+                            <thead><tr><th>Veículo</th><th>Bancos</th><th>KM Rodado</th><th>Combustível</th><th>Pneus</th><th>Óleo</th><th>Preventiva</th><th>Corretiva</th><th>Multas</th><th>Seguro/CSV (rateado)</th><th>Total</th><th>Custo/KM</th></tr></thead>
+                            <tbody id="custosVeiculosTable"></tbody>
+                        </table>
+
+                        <h3 style="margin-top:30px;">👷 Custo Real por KM de Cada Rota Fixa (com mão de obra mensal)</h3>
+                        <p style="font-size:12px; color:#666; margin-bottom:10px;">Calculado automaticamente: custo médio do veículo por km (combustível/manutenção/seguro rateado, baseado no histórico real) + custo mensal de mão de obra da rota fixa (motorista + funcionários + outros, rateado pelos meses de operação). Cadastre/edite o valor mensal em Rotas → Rotas Fixas.</p>
+                        <table>
+                            <thead><tr><th>Rota Fixa</th><th>Saída → Chegada</th><th>Vezes Realizada</th><th>KM Total</th><th>Custo Veículo (histórico)</th><th>Mão de Obra Mensal</th><th>Meses de Operação</th><th>Mão de Obra Total (rateada)</th><th>Custo Total</th><th>Custo Real/KM</th></tr></thead>
+                            <tbody id="custoPorRotaFixaTable"></tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <!-- ANIVERSÁRIOS -->
