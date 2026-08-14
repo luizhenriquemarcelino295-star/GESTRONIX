@@ -126,7 +126,7 @@
                         <button class="btn-excel" onclick="exportarExcel('veiculos')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>Bancos</th><th>KM Atual</th><th>Val. CSV</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>Bancos</th><th>KM Atual</th><th>Valor</th><th>Val. CSV</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
                         <tbody id="veiculosTable"></tbody>
                     </table>
                 </div>
@@ -137,6 +137,10 @@
                     <div class="btn-row">
                         <button onclick="openAddModal('cliente')">+ Adicionar Cliente</button>
                         <button class="btn-excel" onclick="exportarExcel('clientes')">📥 Exportar Excel</button>
+                    </div>
+                    <div class="filters">
+                        <div class="filter-group"><label>Buscar por Nome</label><input type="text" id="filtroClienteNome" placeholder="Digite o nome..." oninput="filtrarClientes()"></div>
+                        <button onclick="limparFiltroClientes()">Limpar</button>
                     </div>
                     <table>
                         <thead><tr><th>Nome</th><th>CPF/CNPJ</th><th>Telefone</th><th>Endereço</th><th>Cidade/UF</th><th>CEP</th><th>Nascimento</th><th>Ações</th></tr></thead>
@@ -357,7 +361,7 @@
                         <button onclick="limparFiltrosTurismo()">Limpar Filtros</button>
                     </div>
                     <table>
-                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>Valor Viagem</th><th>Pedágio</th><th>Combustível</th><th>Diária Motorista</th><th>Adiantamento</th><th>Outros</th><th>Gasto do Veículo</th><th>Acerto</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>Valor Viagem</th><th>Nota Fiscal</th><th>Imposto</th><th>Pedágio</th><th>Combustível</th><th>Diária Motorista</th><th>Valor Pago pro Motorista</th><th>Outros</th><th>Depreciação</th><th>Valor Líquido (- imposto - valor pago ao motorista)</th><th>Acerto</th><th>Ações</th></tr></thead>
                         <tbody id="turismoTable"></tbody>
                     </table>
                 </div>
@@ -382,6 +386,17 @@
                     <table>
                         <thead><tr><th>Nome</th><th>Agência</th><th>Conta</th><th>Saldo</th><th>Ações</th></tr></thead>
                         <tbody id="bancosTable"></tbody>
+                    </table>
+
+                    <h3 style="margin-top:30px;">📅 Saldo em Determinada Data</h3>
+                    <p style="font-size:12px; color:#666; margin-bottom:10px;">Mostra quanto cada banco tinha ao final do dia escolhido, calculado a partir do saldo atual e dos lançamentos do Financeiro depois dessa data.</p>
+                    <div class="filters">
+                        <div class="filter-group"><label>Data</label><input type="date" id="filtroSaldoBancoData" onchange="calcularSaldoBancosNaData()"></div>
+                        <button onclick="limparFiltroSaldoBancos()">Limpar</button>
+                    </div>
+                    <table>
+                        <thead><tr><th>Banco</th><th>Saldo na Data</th><th>Saldo Atual</th></tr></thead>
+                        <tbody id="saldoBancosDataTable"></tbody>
                     </table>
                 </div>
 
@@ -411,6 +426,19 @@
                         <table>
                             <thead><tr><th>Data</th><th>Banco</th><th>Tipo</th><th>Motivo</th><th>Responsável</th><th>Descrição</th><th>Valor</th><th>Ações</th></tr></thead>
                             <tbody id="financeiroTable"></tbody>
+                        </table>
+
+                        <h3 style="margin-top:30px;">🔴 Maiores Gastos por Responsável</h3>
+                        <p style="font-size:12px; color:#666; margin-bottom:10px;">Considera as saídas (Tipo = Saída) de acordo com os filtros acima.</p>
+                        <table>
+                            <thead><tr><th>Responsável</th><th>Qtd. Lançamentos</th><th>Total Gasto</th></tr></thead>
+                            <tbody id="gastosPorResponsavelTable"></tbody>
+                        </table>
+
+                        <h3 style="margin-top:30px;">🔴 Maiores Gastos por Motivo</h3>
+                        <table>
+                            <thead><tr><th>Motivo</th><th>Qtd. Lançamentos</th><th>Total Gasto</th></tr></thead>
+                            <tbody id="gastosPorMotivoTable"></tbody>
                         </table>
                     </div>
 
@@ -468,6 +496,11 @@
                 <!-- DESEMPENHO -->
                 <div id="desempenho" class="page">
                     <h2>📈 Desempenho</h2>
+                    <div class="filters">
+                        <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroDesempenhoDataInicio" onchange="filtrarDesempenho()"></div>
+                        <div class="filter-group"><label>Data Final</label><input type="date" id="filtroDesempenhoDataFim" onchange="filtrarDesempenho()"></div>
+                        <button onclick="limparFiltrosDesempenho()">Limpar Filtros</button>
+                    </div>
                     <div class="tabs">
                         <button class="tab active" onclick="switchTab('desempenhoGeral')">📈 Geral</button>
                         <button class="tab" onclick="switchTab('desempenhoConjunto')">🚗👨‍✈️ Desempenho Conjunto</button>
@@ -486,9 +519,9 @@
                         </table>
 
                         <h3 style="margin-top:30px;">👷 Custo Real por KM de Cada Rota Fixa (com mão de obra mensal)</h3>
-                        <p style="font-size:12px; color:#666; margin-bottom:10px;">Calculado automaticamente: custo médio do veículo por km (combustível/manutenção/seguro rateado, baseado no histórico real) + custo mensal de mão de obra da rota fixa (motorista + funcionários + outros, rateado pelos meses de operação). Cadastre/edite o valor mensal em Rotas → Rotas Fixas.</p>
+                        <p style="font-size:12px; color:#666; margin-bottom:10px;">Calculado automaticamente: custo médio do veículo por km (combustível/manutenção/seguro rateado, baseado no histórico real) + custo mensal de mão de obra da rota fixa (motorista + funcionários + outros, rateado pelos meses de operação), comparado com o valor mensal da rota, nota fiscal e imposto. Cadastre/edite os valores em Rotas → Rotas Fixas.</p>
                         <table>
-                            <thead><tr><th>Rota Fixa</th><th>Saída → Chegada</th><th>Vezes Realizada</th><th>KM Total</th><th>Custo Veículo (histórico)</th><th>Mão de Obra Mensal</th><th>Meses de Operação</th><th>Mão de Obra Total (rateada)</th><th>Custo Total</th><th>Custo Real/KM</th></tr></thead>
+                            <thead><tr><th>Rota Fixa</th><th>Saída → Chegada</th><th>Vezes Realizada</th><th>KM Total</th><th>Custo Veículo (histórico)</th><th>Mão de Obra Mensal</th><th>Meses de Operação</th><th>Mão de Obra Total (rateada)</th><th>Custo Total</th><th>Custo Real/KM</th><th>Faturamento</th><th>Imposto</th><th>Saldo Final</th></tr></thead>
                             <tbody id="custoPorRotaFixaTable"></tbody>
                         </table>
                     </div>
@@ -511,25 +544,18 @@
                                 <option value="semestre">Semestre Atual</option><option value="ano">Ano Atual</option>
                             </select>
                         </div>
+                        <div class="filter-group"><label>Data Inicial</label><input type="date" id="filtroRelatorioDataInicio" onchange="gerarRelatorio(); gerarRelatorioTurismo();"></div>
+                        <div class="filter-group"><label>Data Final</label><input type="date" id="filtroRelatorioDataFim" onchange="gerarRelatorio(); gerarRelatorioTurismo();"></div>
+                        <button onclick="limparFiltrosRelatorio()">Limpar Filtros</button>
                     </div>
+                    <p style="font-size:11px; color:#666; margin-top:-10px;">Se preencher a Data Inicial/Final, ela é usada no lugar do Período pra todos os relatórios abaixo (financeiro e turismo).</p>
                     <div class="top-gastos" id="resumoFinanceiro"></div>
                     <div class="chart-container"><canvas id="chartRelatorio"></canvas></div>
-                    <h3 style="margin-top: 30px;">📌 Desempenho das Rotas Fixas</h3>
-                    <div id="rotasFixasRelatorio"></div>
-
-                    <h3 style="margin-top: 30px;">Detalhamento de Rotas</h3>
-                    <div class="filters">
-                        <div class="filter-group"><label>Rota</label><select id="filtroRotaRelatorio" onchange="gerarRelatorioRotas()"></select></div>
-                    </div>
-                    <table>
-                        <thead><tr><th>Veículo</th><th>Motorista</th><th>Rota Fixa</th><th>Saída</th><th>Destino</th><th>Data</th><th>Tempo</th><th>KM</th><th>Combustível</th><th>Manutenção</th><th>Multas</th><th>Gasto Total</th><th>Custo/KM</th></tr></thead>
-                        <tbody id="rotasGastoTable"></tbody>
-                    </table>
 
                     <h3 style="margin-top: 30px;">Detalhamento de Turismo</h3>
                     <div id="resumoTurismoRelatorio" class="dashboard-cards" style="margin-bottom:20px;"></div>
                     <table>
-                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>KM</th><th>Valor Viagem</th><th>Pedágio</th><th>Combustível</th><th>Diária</th><th>Outros</th><th>Gasto do Veículo</th><th>Total</th><th>Acerto</th></tr></thead>
+                        <thead><tr><th>Data</th><th>Saída</th><th>Chegada</th><th>Motorista</th><th>Cliente</th><th>Veículo</th><th>KM</th><th>Valor Viagem</th><th>Nota Fiscal</th><th>Imposto</th><th>Pedágio</th><th>Combustível</th><th>Diária</th><th>Valor Pago pro Motorista</th><th>Outros</th><th>Depreciação</th><th>Total</th><th>Saldo da Viagem</th><th>Acerto</th></tr></thead>
                         <tbody id="turismoRelatorioTable"></tbody>
                     </table>
                 </div>

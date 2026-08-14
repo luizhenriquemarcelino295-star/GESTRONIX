@@ -154,7 +154,7 @@ const EXPORT_CONFIG = {
     ]},
     veiculos: { titulo: 'Veiculos', campos: [
         ['placa','Placa'], ['marca','Marca'], ['modelo','Modelo'], ['ano','Ano'], ['chassi','Chassi'], ['renavam','Renavam'], ['numero_bancos','Número de Bancos'],
-        ['km_atual','KM Atual'], ['csv_validade','Validade CSV'], ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
+        ['km_atual','KM Atual'], ['valor','Valor do Veículo'], ['csv_validade','Validade CSV'], ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
     ]},
     clientes: { titulo: 'Clientes', campos: [
         ['nome','Nome'], ['cpf_cnpj','CPF/CNPJ'], ['telefone','Telefone'], ['rua','Rua'], ['numero','Número'],
@@ -211,10 +211,12 @@ const EXPORT_CONFIG = {
         [item => motoristaNome(item.motorista_id), 'Motorista'],
         [item => (data.clientes.find(c => c.id === item.cliente_id)?.nome || 'N/A'), 'Cliente'],
         [item => veiculoPlaca(item.veiculo_id), 'Veículo'], ['km','KM'],
-        ['valor_viagem','Valor Viagem'], ['valor_pedagio','Pedágio'], ['combustivel_litros','Litros Combustível'],
-        ['combustivel_valor','Valor Combustível'], ['valor_diaria','Diária Motorista'], ['adiantamento','Adiantamento'],
+        ['valor_viagem','Valor Viagem'], ['nota_fiscal_valor','Valor Nota Fiscal'], ['imposto_percentual','Imposto (%)'],
+        [item => (Number(item.nota_fiscal_valor||0) * Number(item.imposto_percentual||0) / 100).toFixed(2), 'Imposto (R$)'],
+        ['valor_pedagio','Pedágio'], ['combustivel_litros','Litros Combustível'],
+        ['combustivel_valor_litro','Valor por Litro'], ['combustivel_valor','Valor Combustível'], ['valor_diaria','Diária Motorista'], ['adiantamento','Valor Pago pro Motorista'],
         ['outros_descricao','Outros (descrição)'], ['outros_valor','Outros (valor)'],
-        [item => (item.km ? (custoPorKmVeiculo(item.veiculo_id) * Number(item.km)).toFixed(2) : ''), 'Gasto do Veículo'],
+        ['depreciacao','Depreciação'],
         [item => (item.acerto_motorista_pago ? 'Pago' : 'Pendente'), 'Acerto Motorista']
     ]},
     bomba_cargas: { titulo: 'Bomba_Combustivel', campos: [
@@ -429,6 +431,7 @@ function openAddModal(type, item = null) {
                 <div class="form-group"><label>KM Atual</label><input type="number" id="veiculoKmAtual" value="${v(item,'km_atual',0)}"></div>
                 <div class="form-group"><label>Número de Bancos (assentos)</label><input type="number" id="veiculoNumeroBancos" value="${v(item,'numero_bancos')}" placeholder="Ex: 44"></div>
             </div>
+            <div class="form-group"><label>Valor do Veículo</label><input type="number" id="veiculoValor" step="0.01" value="${v(item,'valor')}" placeholder="Valor de compra/mercado"></div>
             <p style="font-size:12px; color:#666; margin: 5px 0 10px;">Os campos abaixo são opcionais:</p>
             <div class="form-row">
                 <div class="form-group"><label>Validade do CSV</label><input type="date" id="veiculoCsvValidade" value="${v(item,'csv_validade')}"></div>
@@ -691,8 +694,8 @@ function openAddModal(type, item = null) {
     } else if (type === 'rota') {
         modalTitle.textContent = item ? 'Editar Rota' : 'Adicionar Rota';
         const veiculosOptions = data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
-        const motoristasOptions = data.motoristas.map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
-        const rotasFixasOptions = data.rotas_fixas.map(rf => `<option value="${rf.id}">${rf.nome}</option>`).join('');
+        const motoristasOptions = [...data.motoristas].sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' })).map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
+        const rotasFixasOptions = [...data.rotas_fixas].sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' })).map(rf => `<option value="${rf.id}">${rf.nome}</option>`).join('');
         html = `
             <div class="form-row">
                 <div class="form-group"><label>Veículo</label><select id="rotaVeiculo">${veiculosOptions}</select></div>
@@ -736,6 +739,12 @@ function openAddModal(type, item = null) {
                 <div class="form-group"><label>Valor Mensal de Demais Funcionários</label><input type="number" id="rotaFixaValorFuncionarios" step="0.01" value="${v(item,'valor_funcionarios',0)}"></div>
             </div>
             <div class="form-group"><label>Valor Mensal de Outros</label><input type="number" id="rotaFixaOutrosValor" step="0.01" value="${v(item,'outros_valor',0)}"></div>
+            <p style="font-size:12px; color:#666; margin: 15px 0 10px;">Faturamento <strong>mensal</strong> dessa rota fixa (pra calcular o saldo final descontando despesas de funcionários, veículo e imposto):</p>
+            <div class="form-group"><label>Valor Mensal da Rota</label><input type="number" id="rotaFixaValor" step="0.01" value="${v(item,'valor_rota_fixa',0)}"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Valor da Nota Fiscal (mensal)</label><input type="number" id="rotaFixaNotaFiscal" step="0.01" value="${v(item,'nota_fiscal_valor',0)}"></div>
+                <div class="form-group"><label>Imposto sobre a Nota (%)</label><input type="number" id="rotaFixaImposto" step="0.01" value="${v(item,'imposto_percentual',0)}"></div>
+            </div>
             <button onclick="addRotaFixa()">${acaoLabel}</button>
         `;
     } else if (type === 'produto') {
@@ -783,8 +792,8 @@ function openAddModal(type, item = null) {
     } else if (type === 'viagem') {
         modalTitle.textContent = item ? 'Editar Viagem de Turismo' : 'Adicionar Viagem de Turismo';
         const veiculosOptions = data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
-        const motoristasOptions = data.motoristas.map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
-        const clientesOptions = data.clientes.map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
+        const motoristasOptions = [...data.motoristas].sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' })).map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
+        const clientesOptions = [...data.clientes].sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' })).map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
         html = `
             <div class="form-row">
                 <div class="form-group"><label>Local de Saída</label><input type="text" id="viagemLocalSaida" value="${v(item,'local_saida')}"></div>
@@ -803,15 +812,22 @@ function openAddModal(type, item = null) {
                 <div class="form-group"><label>Horário</label><input type="time" id="viagemHorario" value="${v(item,'horario')}"></div>
             </div>
             <div class="form-group"><label>Valor da Viagem</label><input type="number" id="viagemValor" step="0.01" value="${v(item,'valor_viagem')}"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Valor da Nota Fiscal</label><input type="number" id="viagemNotaFiscal" step="0.01" value="${v(item,'nota_fiscal_valor')}"></div>
+                <div class="form-group"><label>Imposto sobre a Nota (%)</label><input type="number" id="viagemImposto" step="0.01" value="${v(item,'imposto_percentual')}"></div>
+            </div>
+            <p style="font-size:11px; color:#666; margin: -5px 0 10px;">O valor do imposto (Nota Fiscal × % de Imposto) é descontado do Valor da Viagem pra calcular o Valor Líquido.</p>
+            <div class="form-group"><label>Depreciação do Veículo</label><input type="number" id="viagemDepreciacao" step="0.01" value="${v(item,'depreciacao',0)}" placeholder="Informe o valor de depreciação dessa viagem"></div>
             <div class="form-group"><label>Valor do Pedágio</label><input type="number" id="viagemPedagio" step="0.01" value="${v(item,'valor_pedagio')}"></div>
             <div class="form-row">
                 <div class="form-group"><label>Valor da Diária do Motorista</label><input type="number" id="viagemDiaria" step="0.01" value="${v(item,'valor_diaria')}"></div>
-                <div class="form-group"><label>Adiantamento já dado ao Motorista</label><input type="number" id="viagemAdiantamento" step="0.01" value="${v(item,'adiantamento',0)}"></div>
+                <div class="form-group"><label>Valor Pago pro Motorista</label><input type="number" id="viagemAdiantamento" step="0.01" value="${v(item,'adiantamento',0)}"></div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>Litros de Combustível</label><input type="number" id="viagemCombustivelLitros" step="0.01" value="${v(item,'combustivel_litros')}"></div>
-                <div class="form-group"><label>Valor do Combustível</label><input type="number" id="viagemCombustivelValor" step="0.01" value="${v(item,'combustivel_valor')}"></div>
+                <div class="form-group"><label>Litros de Combustível</label><input type="number" id="viagemCombustivelLitros" step="0.01" value="${v(item,'combustivel_litros')}" oninput="calcularValorCombustivel()"></div>
+                <div class="form-group"><label>Valor por Litro</label><input type="number" id="viagemCombustivelValorLitro" step="0.01" value="${v(item,'combustivel_valor_litro')}" oninput="calcularValorCombustivel()"></div>
             </div>
+            <p style="font-size:11px; color:#666; margin: -5px 0 10px;">Valor do combustível (calculado automaticamente): <strong id="viagemCombustivelValorCalculado">R$ ${Number(v(item,'combustivel_valor',0)).toFixed(2)}</strong></p>
             <div class="form-row">
                 <div class="form-group"><label>Outros (descrição)</label><input type="text" id="viagemOutrosDescricao" value="${v(item,'outros_descricao')}" placeholder="Ex: estacionamento"></div>
                 <div class="form-group"><label>Outros (valor)</label><input type="number" id="viagemOutrosValor" step="0.01" value="${v(item,'outros_valor')}"></div>
@@ -834,6 +850,10 @@ function openAddModal(type, item = null) {
             <div class="form-row">
                 <div class="form-group"><label>Valor a Pagar ao Motorista</label><input type="number" id="simValorMotorista" step="0.01" value="0"></div>
                 <div class="form-group"><label>Adiantamento de Viagem</label><input type="number" id="simAdiantamento" step="0.01" value="0"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Valor da Nota Fiscal</label><input type="number" id="simNotaFiscal" step="0.01" value="0"></div>
+                <div class="form-group"><label>Imposto sobre a Nota (%)</label><input type="number" id="simImposto" step="0.01" value="0"></div>
             </div>
             <div class="form-group"><label>Margem de Lucro Desejada (%)</label><input type="number" id="simMargem" value="20"></div>
             <button onclick="simularViagem()">Calcular</button>
@@ -915,6 +935,8 @@ function simularViagem() {
     const km = parseFloat(document.getElementById('simKM').value);
     const valorMotorista = parseFloat(document.getElementById('simValorMotorista').value) || 0;
     const adiantamento = parseFloat(document.getElementById('simAdiantamento').value) || 0;
+    const notaFiscal = parseFloat(document.getElementById('simNotaFiscal').value) || 0;
+    const impostoPercentual = parseFloat(document.getElementById('simImposto').value) || 0;
     const margem = parseFloat(document.getElementById('simMargem').value) || 0;
     if (!veiculoId || !km) { alert('Selecione o veículo e informe o KM'); return; }
     const custoKm = custoPorKmVeiculo(veiculoId);
@@ -924,7 +946,8 @@ function simularViagem() {
         return;
     }
     const despesaVeiculo = custoKm * km;
-    const custoTotal = despesaVeiculo + valorMotorista + adiantamento;
+    const impostoValor = notaFiscal * impostoPercentual / 100;
+    const custoTotal = despesaVeiculo + valorMotorista + adiantamento + impostoValor;
     const valorSugerido = custoTotal * (1 + margem / 100);
     const lucroEstimado = valorSugerido - custoTotal;
 
@@ -936,6 +959,7 @@ function simularViagem() {
             <p><strong>Despesa do veículo (combustível/manutenção):</strong> R$ ${despesaVeiculo.toFixed(2)}</p>
             <p><strong>Valor ao motorista:</strong> R$ ${valorMotorista.toFixed(2)}</p>
             <p><strong>Adiantamento de viagem:</strong> R$ ${adiantamento.toFixed(2)}</p>
+            <p><strong>Nota Fiscal:</strong> R$ ${notaFiscal.toFixed(2)} — <strong>Imposto (${impostoPercentual}%):</strong> R$ ${impostoValor.toFixed(2)}</p>
             <p style="font-size:16px; margin-top:8px;"><strong>Custo Total:</strong> R$ ${custoTotal.toFixed(2)}</p>
             <p style="font-size:22px; margin-top:10px; color:#0066cc;"><strong>Valor Sugerido (com ${margem}% de margem):</strong> R$ ${valorSugerido.toFixed(2)}</p>
             <p style="font-size:14px; color:#4caf50;"><strong>Lucro estimado:</strong> R$ ${lucroEstimado.toFixed(2)}</p>
@@ -998,6 +1022,7 @@ async function addVeiculo() {
     const renavam = document.getElementById('veiculoRenavam').value;
     const km_atual = parseFloat(document.getElementById('veiculoKmAtual').value) || 0;
     const numero_bancos = parseInt(document.getElementById('veiculoNumeroBancos').value) || null;
+    const valor = parseFloat(document.getElementById('veiculoValor').value) || null;
     const csv_validade = document.getElementById('veiculoCsvValidade').value || null;
     const csv_valor = parseFloat(document.getElementById('veiculoCsvValor').value) || null;
     const tacografo_validade = document.getElementById('veiculoTacografoValidade').value || null;
@@ -1005,7 +1030,7 @@ async function addVeiculo() {
     const apolice_valor = parseFloat(document.getElementById('veiculoApoliceValor').value) || null;
     const crlv_ano = document.getElementById('veiculoCrlvAno').value || null;
     if (!placa || !marca || !modelo || !ano) { alert('Preencha placa, marca, modelo e ano'); return; }
-    const payload = { placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual, numero_bancos, csv_validade, csv_valor, tacografo_validade, apolice_validade, apolice_valor, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null };
+    const payload = { placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual, numero_bancos, valor, csv_validade, csv_valor, tacografo_validade, apolice_validade, apolice_valor, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null };
     const { error } = isEdit
         ? await sb.from('veiculos').update(payload).eq('id', editContext.id)
         : await sb.from('veiculos').insert({ empresa_id: currentEmpresa.id, ...payload });
@@ -1374,8 +1399,11 @@ async function addRotaFixa() {
     const valor_motorista = parseFloat(document.getElementById('rotaFixaValorMotorista').value) || 0;
     const valor_funcionarios = parseFloat(document.getElementById('rotaFixaValorFuncionarios').value) || 0;
     const outros_valor = parseFloat(document.getElementById('rotaFixaOutrosValor').value) || 0;
+    const valor_rota_fixa = parseFloat(document.getElementById('rotaFixaValor').value) || 0;
+    const nota_fiscal_valor = parseFloat(document.getElementById('rotaFixaNotaFiscal').value) || 0;
+    const imposto_percentual = parseFloat(document.getElementById('rotaFixaImposto').value) || 0;
     if (!nome) { alert('Informe o nome da rota fixa'); return; }
-    const payload = { nome, local_saida, local_chegada, valor_motorista, valor_funcionarios, outros_valor };
+    const payload = { nome, local_saida, local_chegada, valor_motorista, valor_funcionarios, outros_valor, valor_rota_fixa, nota_fiscal_valor, imposto_percentual };
     const { error } = isEdit
         ? await sb.from('rotas_fixas').update(payload).eq('id', editContext.id)
         : await sb.from('rotas_fixas').insert({ empresa_id: currentEmpresa.id, ...payload });
@@ -1436,6 +1464,15 @@ async function addAgenda() {
     closeModal(); await loadData(); loadAgenda();
 }
 
+function calcularValorCombustivel() {
+    const litros = parseFloat(document.getElementById('viagemCombustivelLitros').value) || 0;
+    const valorLitro = parseFloat(document.getElementById('viagemCombustivelValorLitro').value) || 0;
+    const total = litros * valorLitro;
+    const span = document.getElementById('viagemCombustivelValorCalculado');
+    if (span) span.textContent = `R$ ${total.toFixed(2)}`;
+    return total;
+}
+
 async function addViagem() {
     const isEdit = editContext && editContext.type === 'viagem';
     const local_saida = document.getElementById('viagemLocalSaida').value;
@@ -1447,18 +1484,23 @@ async function addViagem() {
     const data_viagem = document.getElementById('viagemData').value;
     const horario = document.getElementById('viagemHorario').value || null;
     const valor_viagem = parseFloat(document.getElementById('viagemValor').value) || 0;
+    const nota_fiscal_valor = parseFloat(document.getElementById('viagemNotaFiscal').value) || 0;
+    const imposto_percentual = parseFloat(document.getElementById('viagemImposto').value) || 0;
+    const depreciacao = parseFloat(document.getElementById('viagemDepreciacao').value) || 0;
     const valor_pedagio = parseFloat(document.getElementById('viagemPedagio').value) || 0;
     const valor_diaria = parseFloat(document.getElementById('viagemDiaria').value) || 0;
     const adiantamento = parseFloat(document.getElementById('viagemAdiantamento').value) || 0;
     const combustivel_litros = parseFloat(document.getElementById('viagemCombustivelLitros').value) || 0;
-    const combustivel_valor = parseFloat(document.getElementById('viagemCombustivelValor').value) || 0;
+    const combustivel_valor_litro = parseFloat(document.getElementById('viagemCombustivelValorLitro').value) || 0;
+    const combustivel_valor = combustivel_litros * combustivel_valor_litro;
     const outros_descricao = document.getElementById('viagemOutrosDescricao').value;
     const outros_valor = parseFloat(document.getElementById('viagemOutrosValor').value) || 0;
     const acerto_motorista_pago = document.getElementById('viagemAcerto').value === 'true';
     if (!local_saida || !local_chegada || !data_viagem) { alert('Preencha ao menos saída, chegada e data'); return; }
     const payload = {
         local_saida, local_chegada, motorista_id, cliente_id, veiculo_id, km, data: data_viagem, horario,
-        valor_viagem, valor_pedagio, valor_diaria, adiantamento, combustivel_litros, combustivel_valor, outros_descricao, outros_valor,
+        valor_viagem, nota_fiscal_valor, imposto_percentual, depreciacao,
+        valor_pedagio, valor_diaria, adiantamento, combustivel_litros, combustivel_valor_litro, combustivel_valor, outros_descricao, outros_valor,
         valor_motorista: valor_diaria, acerto_motorista_pago,
         acerto_data: acerto_motorista_pago ? new Date().toISOString().slice(0,10) : null
     };
@@ -1472,7 +1514,7 @@ async function addViagem() {
     const valorLiquido = valor_diaria - adiantamento;
     if (acerto_motorista_pago && !jaEraPago && valorLiquido > 0 && data.bancos.length > 0) {
         const nomesBancos = data.bancos.map((b,i) => `${i+1} - ${b.nome}`).join('\n');
-        const escolha = prompt(`Lançar R$ ${valorLiquido.toFixed(2)} de comissão do motorista no Financeiro (diária R$ ${valor_diaria.toFixed(2)} - adiantamento já pago R$ ${adiantamento.toFixed(2)})?\nDigite o número do banco pra confirmar, ou cancele pra não lançar:\n${nomesBancos}`);
+        const escolha = prompt(`Lançar R$ ${valorLiquido.toFixed(2)} de comissão do motorista no Financeiro (diária R$ ${valor_diaria.toFixed(2)} - valor já pago ao motorista R$ ${adiantamento.toFixed(2)})?\nDigite o número do banco pra confirmar, ou cancele pra não lançar:\n${nomesBancos}`);
         const idx = parseInt(escolha) - 1;
         if (data.bancos[idx]) {
             const banco = data.bancos[idx];
@@ -1494,6 +1536,17 @@ function filtrarPorData(lista, campoData, dataInicio, dataFim) {
     if (dataInicio) r = r.filter(x => parseDataLocal(x[campoData]) >= parseDataLocal(dataInicio));
     if (dataFim) r = r.filter(x => parseDataLocal(x[campoData]) <= parseDataLocal(dataFim));
     return r;
+}
+
+function ordenarPorData(lista, campoData) {
+    return [...lista].sort((a, b) => {
+        const da = a[campoData] ? parseDataLocal(a[campoData]) : null;
+        const db = b[campoData] ? parseDataLocal(b[campoData]) : null;
+        if (!da && !db) return 0;
+        if (!da) return 1;
+        if (!db) return -1;
+        return da - db;
+    });
 }
 
 function preencherSelectVeiculo(selectId) {
@@ -1524,7 +1577,8 @@ function loadMotoristas() {
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('motoristas','${m.id}','motorista')">Editar</button>
             <button class="btn-small" onclick="deleteItem('motoristas', '${m.id}')">Deletar</button>
         </td></tr>`;
-    document.getElementById('funcMotoristasTable').innerHTML = data.motoristas.map(linhaMotorista).join('');
+    const motoristasOrdenados = [...data.motoristas].sort((a, b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' }));
+    document.getElementById('funcMotoristasTable').innerHTML = motoristasOrdenados.map(linhaMotorista).join('');
 }
 
 function loadFuncionarios() {
@@ -1533,11 +1587,12 @@ function loadFuncionarios() {
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('funcionarios','${f.id}','funcionario')">Editar</button>
             <button class="btn-small" onclick="deleteItem('funcionarios', '${f.id}')">Deletar</button>
         </td></tr>`;
-    document.getElementById('funcAtivosTable').innerHTML = data.funcionarios.filter(f => f.status === 'ativo').map(f =>
+    const porNome = (a, b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' });
+    document.getElementById('funcAtivosTable').innerHTML = data.funcionarios.filter(f => f.status === 'ativo').sort(porNome).map(f =>
         linha(f, `<td>${f.cpf}</td><td>${f.telefone}</td><td>${f.data_admissao ? formatarData(f.data_admissao) : '-'}</td><td>${f.salario ? 'R$ ' + Number(f.salario).toFixed(2) : '-'}</td>`)).join('');
-    document.getElementById('funcDemitidosTable').innerHTML = data.funcionarios.filter(f => f.status === 'demitido').map(f =>
+    document.getElementById('funcDemitidosTable').innerHTML = data.funcionarios.filter(f => f.status === 'demitido').sort(porNome).map(f =>
         linha(f, `<td>${f.cpf}</td><td>${f.data_admissao ? formatarData(f.data_admissao) : '-'}</td><td>${f.data_demissao ? formatarData(f.data_demissao) : '-'}</td>`)).join('');
-    document.getElementById('funcExperienciaTable').innerHTML = data.funcionarios.filter(f => f.status === 'experiencia').map(f =>
+    document.getElementById('funcExperienciaTable').innerHTML = data.funcionarios.filter(f => f.status === 'experiencia').sort(porNome).map(f =>
         linha(f, `<td>${f.cpf}</td><td>${f.experiencia_inicio ? formatarData(f.experiencia_inicio) : '-'}</td><td>${f.experiencia_fim ? formatarData(f.experiencia_fim) : '-'}</td>`)).join('');
 }
 
@@ -1546,6 +1601,7 @@ function loadVeiculos() {
         <tr><td>${vv.placa}</td><td>${vv.marca}</td><td>${vv.modelo}</td><td>${vv.ano}</td><td>${vv.chassi||'-'}</td><td>${vv.renavam||'-'}</td>
         <td>${vv.numero_bancos || '-'}</td>
         <td>${Number(vv.km_atual||0).toLocaleString('pt-BR')} km</td>
+        <td>${vv.valor ? 'R$ ' + Number(vv.valor).toFixed(2) : '-'}</td>
         <td>${vv.csv_validade ? formatarData(vv.csv_validade) : '-'}</td>
         <td>${vv.tacografo_validade ? formatarData(vv.tacografo_validade) : '-'}</td>
         <td>${vv.apolice_validade ? formatarData(vv.apolice_validade) : '-'}</td>
@@ -1558,7 +1614,15 @@ function loadVeiculos() {
 }
 
 function loadClientes() {
-    document.getElementById('clientesTable').innerHTML = data.clientes.map(c => `
+    filtrarClientes();
+}
+
+function filtrarClientes() {
+    const busca = (document.getElementById('filtroClienteNome')?.value || '').toLowerCase().trim();
+    let filtrado = [...data.clientes].sort((a, b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' }));
+    if (busca) filtrado = filtrado.filter(c => (c.nome||'').toLowerCase().includes(busca));
+
+    document.getElementById('clientesTable').innerHTML = filtrado.map(c => `
         <tr><td>${c.nome}</td><td>${c.cpf_cnpj}</td><td>${c.telefone}</td>
         <td>${c.rua||''}${c.numero ? ', '+c.numero : ''}${c.bairro ? ' - '+c.bairro : ''}</td>
         <td>${c.cidade||''}${c.uf ? '/'+c.uf : ''}</td><td>${c.cep||'-'}</td>
@@ -1566,7 +1630,12 @@ function loadClientes() {
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('clientes','${c.id}','cliente')">Editar</button>
             <button class="btn-small" onclick="deleteItem('clientes', '${c.id}')">Deletar</button>
-        </td></tr>`).join('');
+        </td></tr>`).join('') || '<tr><td colspan="8" style="color:#666; text-align:center; padding:20px;">Nenhum cliente encontrado com esse nome.</td></tr>';
+}
+
+function limparFiltroClientes() {
+    document.getElementById('filtroClienteNome').value = '';
+    filtrarClientes();
 }
 
 function loadAbastecimentos() {
@@ -1579,7 +1648,7 @@ function filtrarAbastecimentos() {
     const dataFim = document.getElementById('filtroAbastecimentoDataFim')?.value || '';
     let lista = data.abastecimentos;
     if (veiculoId) lista = lista.filter(a => a.veiculo_id === veiculoId);
-    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    lista = ordenarPorData(filtrarPorData(lista, 'data', dataInicio, dataFim), 'data');
     document.getElementById('abastecimentosTable').innerHTML = lista.map(a => `
         <tr><td>${veiculoPlaca(a.veiculo_id)}</td><td>${a.fonte === 'bomba' ? '🛢️ Bomba' : '⛽ Posto'}</td><td>${formatarData(a.data)}</td>
         <td>${a.km}</td><td>${Number(a.litros).toFixed(2)}</td><td>R$ ${Number(a.valor_litro).toFixed(2)}</td>
@@ -1600,7 +1669,7 @@ function filtrarPneus() {
     const dataFim = document.getElementById('filtroPneuDataFim')?.value || '';
     let lista = data.pneus;
     if (veiculoId) lista = lista.filter(p => p.veiculo_id === veiculoId);
-    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    lista = ordenarPorData(filtrarPorData(lista, 'data', dataInicio, dataFim), 'data');
     document.getElementById('neusTable').innerHTML = lista.map(p => `
         <tr><td>${veiculoPlaca(p.veiculo_id)}</td><td>${formatarData(p.data)}</td>
         <td>${p.tipo||'-'}</td><td>${p.oficina||'-'}</td><td>${p.quantidade||1}</td>
@@ -1622,7 +1691,7 @@ function filtrarOleos() {
     const dataFim = document.getElementById('filtroOleoDataFim')?.value || '';
     let lista = data.oleos;
     if (veiculoId) lista = lista.filter(o => o.veiculo_id === veiculoId);
-    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    lista = ordenarPorData(filtrarPorData(lista, 'data', dataInicio, dataFim), 'data');
     document.getElementById('oleosTable').innerHTML = lista.map(o => {
         const kmFaltando = o.km_proxima - veiculoKmAtual(o.veiculo_id);
         const cls = kmFaltando <= 5000 ? 'style="background:#fff3cd;"' : '';
@@ -1647,7 +1716,7 @@ function filtrarPreventivas() {
     const dataFim = document.getElementById('filtroPreventivaDataFim')?.value || '';
     let lista = data.preventivas;
     if (veiculoId) lista = lista.filter(p => p.veiculo_id === veiculoId);
-    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    lista = ordenarPorData(filtrarPorData(lista, 'data', dataInicio, dataFim), 'data');
     document.getElementById('preventivaTable').innerHTML = lista.map(p => {
         const kmFaltando = p.km_proxima - (p.km_atual || 0);
         const cls = kmFaltando <= 5000 ? 'style="background:#fff3cd;"' : '';
@@ -1671,7 +1740,7 @@ function filtrarCorretivas() {
     const dataFim = document.getElementById('filtroCorretivaDataFim')?.value || '';
     let lista = data.corretivas;
     if (veiculoId) lista = lista.filter(c => c.veiculo_id === veiculoId);
-    lista = filtrarPorData(lista, 'data', dataInicio, dataFim);
+    lista = ordenarPorData(filtrarPorData(lista, 'data', dataInicio, dataFim), 'data');
     document.getElementById('corretivaTable').innerHTML = lista.map(c => `
         <tr><td>${veiculoPlaca(c.veiculo_id)}</td><td>${formatarData(c.data)}</td>
         <td>${c.descricao}</td><td>${c.oficina||'-'}</td><td>${c.km_atual||'-'}</td>
@@ -1685,7 +1754,7 @@ function filtrarCorretivas() {
 
 function loadContasPagar() {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
-    document.getElementById('contasPagarTable').innerHTML = data.contas_pagar.map(c => {
+    document.getElementById('contasPagarTable').innerHTML = ordenarPorData(data.contas_pagar, 'data_vencimento').map(c => {
         const vencimento = parseDataLocal(c.data_vencimento);
         const atrasada = c.status === 'pendente' && vencimento < hoje;
         const badge = c.status === 'pago' ? '<span class="badge badge-pago">Pago</span>'
@@ -1705,7 +1774,7 @@ function loadContasPagar() {
 
 function loadContasReceber() {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
-    document.getElementById('contasReceberTable').innerHTML = data.contas_receber.map(c => {
+    document.getElementById('contasReceberTable').innerHTML = ordenarPorData(data.contas_receber, 'data_vencimento').map(c => {
         const vencimento = parseDataLocal(c.data_vencimento);
         const atrasada = c.status === 'pendente' && vencimento < hoje;
         const badge = c.status === 'recebido' ? '<span class="badge badge-pago">Recebido</span>'
@@ -1772,7 +1841,7 @@ function loadGalaoOleo() {
 }
 
 function loadMultas() {
-    document.getElementById('multasTable').innerHTML = data.multas.map(m => `
+    document.getElementById('multasTable').innerHTML = ordenarPorData(data.multas, 'data').map(m => `
         <tr><td>${veiculoPlaca(m.veiculo_id)}</td><td>${formatarData(m.data)}</td>
         <td>${m.descricao}</td><td>R$ ${Number(m.valor).toFixed(2)}</td>
         <td>
@@ -1788,10 +1857,34 @@ function loadBancos() {
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('bancos','${b.id}','banco')">Editar</button>
             <button class="btn-small" onclick="deleteItem('bancos', '${b.id}')">Deletar</button>
         </td></tr>`).join('');
+    calcularSaldoBancosNaData();
+}
+
+function calcularSaldoBancosNaData() {
+    const tbody = document.getElementById('saldoBancosDataTable');
+    if (!tbody) return;
+    const dataEscolhida = document.getElementById('filtroSaldoBancoData')?.value || '';
+    if (!dataEscolhida) {
+        tbody.innerHTML = '<tr><td colspan="3" style="color:#666; text-align:center; padding:20px;">Escolha uma data acima pra ver o saldo que cada banco tinha nela.</td></tr>';
+        return;
+    }
+    const dataRef = parseDataLocal(dataEscolhida);
+    tbody.innerHTML = data.bancos.map(b => {
+        // desfaz (reverte) os lançamentos posteriores à data escolhida pra "voltar no tempo" a partir do saldo atual
+        const lancamentosDepois = data.financeiro.filter(f => f.banco_id === b.id && parseDataLocal(f.data) > dataRef);
+        const ajuste = lancamentosDepois.reduce((s, f) => s + (f.tipo === 'entrada' ? -Number(f.valor) : Number(f.valor)), 0);
+        const saldoNaData = Number(b.saldo) + ajuste;
+        return `<tr><td>${b.nome}</td><td><strong>R$ ${saldoNaData.toFixed(2)}</strong></td><td>R$ ${Number(b.saldo).toFixed(2)}</td></tr>`;
+    }).join('') || '<tr><td colspan="3" style="color:#666; text-align:center; padding:20px;">Nenhum banco cadastrado ainda.</td></tr>';
+}
+
+function limparFiltroSaldoBancos() {
+    document.getElementById('filtroSaldoBancoData').value = '';
+    calcularSaldoBancosNaData();
 }
 
 function loadFinanceiro() {
-    document.getElementById('financeiroTable').innerHTML = data.financeiro.map(f => `
+    document.getElementById('financeiroTable').innerHTML = ordenarPorData(data.financeiro, 'data').map(f => `
         <tr><td>${formatarData(f.data)}</td><td>${data.bancos.find(b=>b.id===f.banco_id)?.nome || 'N/A'}</td>
         <td>${f.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td><td>${f.motivo}</td><td>${f.descricao||''}</td>
         <td>R$ ${Number(f.valor).toFixed(2)}</td>
@@ -1799,6 +1892,7 @@ function loadFinanceiro() {
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('financeiro','${f.id}','financeiro')">Editar</button>
             <button class="btn-small" onclick="deleteItem('financeiro', '${f.id}')">Deletar</button>
         </td></tr>`).join('');
+    gerarGastosPorResponsavelEMotivo(data.financeiro);
 }
 
 function loadRotas() {
@@ -1837,7 +1931,7 @@ function filtrarRotas() {
     if (veiculoId) filtrado = filtrado.filter(r => r.veiculo_id === veiculoId);
     if (rotaFixaId) filtrado = filtrado.filter(r => r.rota_fixa_id === rotaFixaId);
     if (motoristaId) filtrado = filtrado.filter(r => r.motorista_id === motoristaId);
-    filtrado = filtrarPorData(filtrado, 'data_inicio', dataInicio, dataFim);
+    filtrado = ordenarPorData(filtrarPorData(filtrado, 'data_inicio', dataInicio, dataFim), 'data_inicio');
 
     document.getElementById('rotasTable').innerHTML = filtrado.map(r => `
         <tr><td>${veiculoPlaca(r.veiculo_id)}</td><td>${motoristaNome(r.motorista_id)}</td>
@@ -1864,7 +1958,8 @@ function limparFiltrosRotas() {
 function loadRotasFixasLista() {
     const tbody = document.getElementById('rotasFixasListaTable');
     if (!tbody) return;
-    tbody.innerHTML = data.rotas_fixas.map(rf => `
+    const rotasFixasOrdenadas = [...data.rotas_fixas].sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' }));
+    tbody.innerHTML = rotasFixasOrdenadas.map(rf => `
         <tr><td>${rf.nome}</td><td>${rf.local_saida||'-'}</td><td>${rf.local_chegada||'-'}</td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('rotas_fixas','${rf.id}','rotaFixa')">Editar</button>
@@ -1873,7 +1968,8 @@ function loadRotasFixasLista() {
 }
 
 function loadProdutos() {
-    document.getElementById('produtosTable').innerHTML = data.produtos.map(p => {
+    const produtosOrdenados = [...data.produtos].sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR', { sensitivity: 'base' }));
+    document.getElementById('produtosTable').innerHTML = produtosOrdenados.map(p => {
         const baixo = Number(p.quantidade) <= Number(p.quantidade_minima);
         return `<tr class="${baixo ? 'estoque-baixo' : ''}">
             <td>${p.nome}</td><td>${p.categoria || '-'}</td><td>${p.quantidade}${baixo ? ' ⚠️' : ''}</td>
@@ -1926,17 +2022,22 @@ function filtrarTurismo() {
     if (dataInicio) filtrado = filtrado.filter(vv => parseDataLocal(vv.data) >= parseDataLocal(dataInicio));
     if (dataFim) filtrado = filtrado.filter(vv => parseDataLocal(vv.data) <= parseDataLocal(dataFim));
     if (clienteId) filtrado = filtrado.filter(vv => vv.cliente_id === clienteId);
+    filtrado = ordenarPorData(filtrado, 'data');
     document.getElementById('turismoTable').innerHTML = filtrado.map(vg => {
-        const gastoVeiculo = vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0;
+        const impostoValor = Number(vg.nota_fiscal_valor||0) * Number(vg.imposto_percentual||0) / 100;
+        const valorLiquido = Number(vg.valor_viagem||0) - impostoValor - Number(vg.adiantamento||0);
         return `<tr><td>${formatarData(vg.data)}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
         <td>${motoristaNome(vg.motorista_id)}</td><td>${data.clientes.find(c=>c.id===vg.cliente_id)?.nome || 'N/A'}</td>
         <td>${veiculoPlaca(vg.veiculo_id)}</td><td>R$ ${Number(vg.valor_viagem).toFixed(2)}</td>
+        <td>R$ ${Number(vg.nota_fiscal_valor||0).toFixed(2)}</td>
+        <td>${Number(vg.imposto_percentual||0).toFixed(2)}% <span style="font-size:11px; color:#666;">(R$ ${impostoValor.toFixed(2)})</span></td>
         <td>R$ ${Number(vg.valor_pedagio||0).toFixed(2)}</td>
         <td>${vg.combustivel_litros ? Number(vg.combustivel_litros).toFixed(1)+'L / ' : ''}R$ ${Number(vg.combustivel_valor||0).toFixed(2)}</td>
         <td>R$ ${Number(vg.valor_diaria||0).toFixed(2)}</td>
         <td>R$ ${Number(vg.adiantamento||0).toFixed(2)}</td>
         <td>${vg.outros_descricao ? vg.outros_descricao+': R$ '+Number(vg.outros_valor||0).toFixed(2) : '-'}</td>
-        <td>${vg.km ? `R$ ${gastoVeiculo.toFixed(2)} <span style="font-size:11px; color:#666;">(${vg.km} km)</span>` : '-'}</td>
+        <td>R$ ${Number(vg.depreciacao||0).toFixed(2)}</td>
+        <td>R$ ${valorLiquido.toFixed(2)}</td>
         <td><span class="badge ${vg.acerto_motorista_pago ? 'badge-pago' : 'badge-pendente'}">${vg.acerto_motorista_pago ? 'Pago' : 'Pendente'}</span></td>
         <td>
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('turismo_viagens','${vg.id}','viagem')">Editar</button>
@@ -1953,9 +2054,13 @@ function limparFiltrosTurismo() {
 }
 
 function loadDesempenho() {
+    const dataInicio = document.getElementById('filtroDesempenhoDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroDesempenhoDataFim')?.value || '';
+    const rotasFiltradas = filtrarPorData(data.rotas, 'data_inicio', dataInicio, dataFim);
+
     let htmlVeiculos = '<h3>🚗 Desempenho dos Veículos</h3>';
     htmlVeiculos += data.veiculos.map(vv => {
-        const rotasVeiculo = data.rotas.filter(r => r.veiculo_id === vv.id);
+        const rotasVeiculo = rotasFiltradas.filter(r => r.veiculo_id === vv.id);
         const kmTotal = rotasVeiculo.reduce((s, r) => s + kmPercorrido(r), 0);
         const custoKm = custoPorKmVeiculo(vv.id);
         const gastos = custoKm * kmTotal;
@@ -1970,7 +2075,7 @@ function loadDesempenho() {
     }).join('');
     let htmlMotoristas = '<h3 style="margin-top:30px;">👨‍✈️ Desempenho dos Motoristas</h3>';
     htmlMotoristas += data.motoristas.map(m => {
-        const rotasMotorista = data.rotas.filter(r => r.motorista_id === m.id);
+        const rotasMotorista = rotasFiltradas.filter(r => r.motorista_id === m.id);
         const kmTotal = rotasMotorista.reduce((s, r) => s + kmPercorrido(r), 0);
         let gastos = 0;
         const veiculosUsados = [...new Set(rotasMotorista.map(r => r.veiculo_id))];
@@ -1989,7 +2094,7 @@ function loadDesempenho() {
 
     document.getElementById('desempenhoConjunto').innerHTML = '<h3>🚗👨‍✈️ Clique em um veículo para ver a média de cada motorista nele</h3>' +
         data.veiculos.map(vv => {
-            const rotasVeiculo = data.rotas.filter(r => r.veiculo_id === vv.id);
+            const rotasVeiculo = rotasFiltradas.filter(r => r.veiculo_id === vv.id);
             const motoristasIds = [...new Set(rotasVeiculo.map(r => r.motorista_id))];
             const linhasMotoristas = motoristasIds.map(mid => {
                 const rotasDoMotorista = rotasVeiculo.filter(r => r.motorista_id === mid);
@@ -2005,12 +2110,22 @@ function loadDesempenho() {
             </div>`;
         }).join('');
 
-    document.getElementById('desempenhoRotaFixa').innerHTML = '<h3>📌 Desempenho das Rotas Fixas</h3>' + renderRotasFixasPerformance();
+    document.getElementById('desempenhoRotaFixa').innerHTML = '<h3>📌 Desempenho das Rotas Fixas</h3>' + renderRotasFixasPerformance(rotasFiltradas);
 }
 
-function renderRotasFixasPerformance() {
+function filtrarDesempenho() { loadDesempenho(); gerarCustosVeiculos(); }
+
+function limparFiltrosDesempenho() {
+    document.getElementById('filtroDesempenhoDataInicio').value = '';
+    document.getElementById('filtroDesempenhoDataFim').value = '';
+    loadDesempenho();
+    gerarCustosVeiculos();
+}
+
+function renderRotasFixasPerformance(rotasBase) {
+    const rotas = rotasBase || data.rotas;
     return data.rotas_fixas.map(rf => {
-        const instancias = data.rotas.filter(r => r.rota_fixa_id === rf.id);
+        const instancias = rotas.filter(r => r.rota_fixa_id === rf.id);
         const kmTotal = instancias.reduce((s,r) => s + kmPercorrido(r), 0);
         const gastoTotal = instancias.reduce((s,r) => s + custoPorKmVeiculo(r.veiculo_id) * kmPercorrido(r), 0);
         const custoPorKm = kmTotal > 0 ? (gastoTotal / kmTotal).toFixed(2) : 0;
@@ -2029,14 +2144,24 @@ function renderRotasFixasPerformance() {
 function toggleSubList(id) { document.getElementById(id).classList.toggle('open'); }
 
 function gerarCustosVeiculos() {
+    const dataInicio = document.getElementById('filtroDesempenhoDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroDesempenhoDataFim')?.value || '';
+    const rotasFiltradas = filtrarPorData(data.rotas, 'data_inicio', dataInicio, dataFim);
+    const abastecimentosFiltrados = filtrarPorData(data.abastecimentos, 'data', dataInicio, dataFim);
+    const pneusFiltrados = filtrarPorData(data.pneus, 'data', dataInicio, dataFim);
+    const oleosFiltrados = filtrarPorData(data.oleos, 'data', dataInicio, dataFim);
+    const preventivasFiltradas = filtrarPorData(data.preventivas, 'data', dataInicio, dataFim);
+    const corretivasFiltradas = filtrarPorData(data.corretivas, 'data', dataInicio, dataFim);
+    const multasFiltradas = filtrarPorData(data.multas, 'data', dataInicio, dataFim);
+
     document.getElementById('custosVeiculosTable').innerHTML = data.veiculos.map(vv => {
-        const kmTotal = data.rotas.filter(r => r.veiculo_id === vv.id).reduce((s,r) => s + kmPercorrido(r), 0);
-        const combustivel = data.abastecimentos.filter(a => a.veiculo_id === vv.id).reduce((s,a) => s + Number(a.valor_total), 0);
-        const pneus = data.pneus.filter(p => p.veiculo_id === vv.id).reduce((s,p) => s + Number(p.valor||0), 0);
-        const oleo = data.oleos.filter(o => o.veiculo_id === vv.id).reduce((s,o) => s + Number(o.valor||0), 0);
-        const preventiva = data.preventivas.filter(p => p.veiculo_id === vv.id).reduce((s,p) => s + Number(p.valor||0), 0);
-        const corretiva = data.corretivas.filter(c => c.veiculo_id === vv.id).reduce((s,c) => s + Number(c.valor||0), 0);
-        const multas = data.multas.filter(m => m.veiculo_id === vv.id).reduce((s,m) => s + Number(m.valor||0), 0);
+        const kmTotal = rotasFiltradas.filter(r => r.veiculo_id === vv.id).reduce((s,r) => s + kmPercorrido(r), 0);
+        const combustivel = abastecimentosFiltrados.filter(a => a.veiculo_id === vv.id).reduce((s,a) => s + Number(a.valor_total), 0);
+        const pneus = pneusFiltrados.filter(p => p.veiculo_id === vv.id).reduce((s,p) => s + Number(p.valor||0), 0);
+        const oleo = oleosFiltrados.filter(o => o.veiculo_id === vv.id).reduce((s,o) => s + Number(o.valor||0), 0);
+        const preventiva = preventivasFiltradas.filter(p => p.veiculo_id === vv.id).reduce((s,p) => s + Number(p.valor||0), 0);
+        const corretiva = corretivasFiltradas.filter(c => c.veiculo_id === vv.id).reduce((s,c) => s + Number(c.valor||0), 0);
+        const multas = multasFiltradas.filter(m => m.veiculo_id === vv.id).reduce((s,m) => s + Number(m.valor||0), 0);
         const meses = mesesOperacaoVeiculo(vv.id);
         const seguroCsv = ((Number(vv.apolice_valor||0) + Number(vv.csv_valor||0)) / 12) * meses;
         const total = combustivel + pneus + oleo + preventiva + corretiva + multas + seguroCsv;
@@ -2048,12 +2173,11 @@ function gerarCustosVeiculos() {
         <td><strong>R$ ${total.toFixed(2)}</strong></td><td>R$ ${custoKm}/km</td></tr>`;
     }).join('');
 
-    preencherSelectVeiculo('filtroCustoRealVeiculo');
-    gerarCustoPorRotaFixa();
+    gerarCustoPorRotaFixa(rotasFiltradas);
 }
 
-function mesesOperacaoRotaFixa(rotaFixaId) {
-    const datasRotas = data.rotas.filter(r => r.rota_fixa_id === rotaFixaId && r.data_inicio).map(r => parseDataLocal(r.data_inicio));
+function mesesOperacaoRotaFixa(instancias) {
+    const datasRotas = instancias.filter(r => r.data_inicio).map(r => parseDataLocal(r.data_inicio));
     if (datasRotas.length === 0) return 1;
     const min = new Date(Math.min(...datasRotas));
     const max = new Date(Math.max(...datasRotas));
@@ -2061,22 +2185,30 @@ function mesesOperacaoRotaFixa(rotaFixaId) {
     return Math.max(1, meses);
 }
 
-function gerarCustoPorRotaFixa() {
+function gerarCustoPorRotaFixa(rotasBase) {
+    const rotas = rotasBase || data.rotas;
     document.getElementById('custoPorRotaFixaTable').innerHTML = data.rotas_fixas.map(rf => {
-        const instancias = data.rotas.filter(r => r.rota_fixa_id === rf.id);
+        const instancias = rotas.filter(r => r.rota_fixa_id === rf.id);
         const kmTotal = instancias.reduce((s,r) => s + kmPercorrido(r), 0);
         const custoVeiculoHistorico = instancias.reduce((s,r) => s + custoPorKmVeiculo(r.veiculo_id) * kmPercorrido(r), 0);
         const maoDeObraMensal = Number(rf.valor_motorista||0) + Number(rf.valor_funcionarios||0) + Number(rf.outros_valor||0);
-        const meses = mesesOperacaoRotaFixa(rf.id);
+        const meses = mesesOperacaoRotaFixa(instancias);
         const maoDeObraTotal = maoDeObraMensal * meses;
         const custoTotal = custoVeiculoHistorico + maoDeObraTotal;
         const custoRealPorKm = kmTotal > 0 ? custoTotal / kmTotal : 0;
+        const faturamentoTotal = Number(rf.valor_rota_fixa||0) * meses;
+        const impostoMensal = Number(rf.nota_fiscal_valor||0) * Number(rf.imposto_percentual||0) / 100;
+        const impostoTotal = impostoMensal * meses;
+        const saldoFinal = faturamentoTotal - maoDeObraTotal - custoVeiculoHistorico - impostoTotal;
         return `<tr><td>${rf.nome}</td><td>${rf.local_saida||'-'} → ${rf.local_chegada||'-'}</td>
         <td>${instancias.length}</td><td>${kmTotal} km</td>
         <td>R$ ${custoVeiculoHistorico.toFixed(2)}</td><td>R$ ${maoDeObraMensal.toFixed(2)}/mês</td><td>${meses}</td>
         <td>R$ ${maoDeObraTotal.toFixed(2)}</td>
-        <td><strong>R$ ${custoTotal.toFixed(2)}</strong></td><td><strong>R$ ${custoRealPorKm.toFixed(2)}/km</strong></td></tr>`;
-    }).join('') || '<tr><td colspan="10" style="color:#666;">Nenhuma rota fixa cadastrada. Vá em Rotas → "Nova Rota Fixa" e preencha os valores mensais de mão de obra.</td></tr>';
+        <td><strong>R$ ${custoTotal.toFixed(2)}</strong></td><td><strong>R$ ${custoRealPorKm.toFixed(2)}/km</strong></td>
+        <td>R$ ${faturamentoTotal.toFixed(2)}</td>
+        <td>${Number(rf.imposto_percentual||0).toFixed(2)}% <span style="font-size:11px; color:#666;">(R$ ${impostoTotal.toFixed(2)})</span></td>
+        <td><strong>R$ ${saldoFinal.toFixed(2)}</strong></td></tr>`;
+    }).join('') || '<tr><td colspan="13" style="color:#666;">Nenhuma rota fixa cadastrada. Vá em Rotas → "Nova Rota Fixa" e preencha os valores mensais de mão de obra.</td></tr>';
 }
 
 function limparFiltroMedias() {
@@ -2341,6 +2473,7 @@ function filtrarFinanceiro() {
     if (motivo) filtrado = filtrado.filter(f => f.motivo === motivo);
     if (bancoId) filtrado = filtrado.filter(f => f.banco_id === bancoId);
     if (responsavel) filtrado = filtrado.filter(f => f.responsavel === responsavel);
+    filtrado = ordenarPorData(filtrado, 'data');
     document.getElementById('financeiroTable').innerHTML = filtrado.map(f => `
         <tr><td>${formatarData(f.data)}</td><td>${data.bancos.find(b=>b.id===f.banco_id)?.nome || 'N/A'}</td>
         <td>${f.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td><td>${f.motivo}</td><td>${f.responsavel||'-'}</td><td>${f.descricao||''}</td>
@@ -2349,6 +2482,36 @@ function filtrarFinanceiro() {
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('financeiro','${f.id}','financeiro')">Editar</button>
             <button class="btn-small" onclick="deleteItem('financeiro', '${f.id}')">Deletar</button>
         </td></tr>`).join('');
+
+    gerarGastosPorResponsavelEMotivo(filtrado);
+}
+
+function gerarGastosPorResponsavelEMotivo(lista) {
+    const saidas = lista.filter(f => f.tipo === 'saida');
+
+    const porResponsavel = {};
+    saidas.forEach(f => {
+        const chave = f.responsavel || 'Sem responsável';
+        if (!porResponsavel[chave]) porResponsavel[chave] = { total: 0, qtd: 0 };
+        porResponsavel[chave].total += Number(f.valor || 0);
+        porResponsavel[chave].qtd += 1;
+    });
+    const listaResponsavel = Object.entries(porResponsavel).sort((a,b) => b[1].total - a[1].total);
+    document.getElementById('gastosPorResponsavelTable').innerHTML = listaResponsavel.map(([nome, info]) => `
+        <tr><td>${nome}</td><td>${info.qtd}</td><td><strong>R$ ${info.total.toFixed(2)}</strong></td></tr>
+    `).join('') || '<tr><td colspan="3" style="color:#666; text-align:center; padding:20px;">Nenhuma saída encontrada com esses filtros.</td></tr>';
+
+    const porMotivo = {};
+    saidas.forEach(f => {
+        const chave = f.motivo || 'Sem motivo';
+        if (!porMotivo[chave]) porMotivo[chave] = { total: 0, qtd: 0 };
+        porMotivo[chave].total += Number(f.valor || 0);
+        porMotivo[chave].qtd += 1;
+    });
+    const listaMotivo = Object.entries(porMotivo).sort((a,b) => b[1].total - a[1].total);
+    document.getElementById('gastosPorMotivoTable').innerHTML = listaMotivo.map(([nome, info]) => `
+        <tr><td>${nome}</td><td>${info.qtd}</td><td><strong>R$ ${info.total.toFixed(2)}</strong></td></tr>
+    `).join('') || '<tr><td colspan="3" style="color:#666; text-align:center; padding:20px;">Nenhuma saída encontrada com esses filtros.</td></tr>';
 }
 
 function limparFiltros() {
@@ -2358,7 +2521,7 @@ function limparFiltros() {
     document.getElementById('filtroMotivo').value = '';
     document.getElementById('filtroBanco').value = '';
     document.getElementById('filtroResponsavel').value = '';
-    loadFinanceiro();
+    filtrarFinanceiro();
 }
 
 function preencherFiltroMotivo() {
@@ -2385,13 +2548,20 @@ function preencherFiltroMotivo() {
 }
 
 function gerarRelatorio() {
-    const periodo = document.getElementById('filtroRelatorio').value;
+    const dataInicioCustom = document.getElementById('filtroRelatorioDataInicio')?.value || '';
+    const dataFimCustom = document.getElementById('filtroRelatorioDataFim')?.value || '';
     const hoje = new Date();
     let dataInicio, dataFim;
-    if (periodo === 'mes') { dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1); dataFim = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0); }
-    else if (periodo === 'trimestre') { const t = Math.floor(hoje.getMonth()/3); dataInicio = new Date(hoje.getFullYear(), t*3, 1); dataFim = new Date(hoje.getFullYear(), t*3+3, 0); }
-    else if (periodo === 'semestre') { const s = Math.floor(hoje.getMonth()/6); dataInicio = new Date(hoje.getFullYear(), s*6, 1); dataFim = new Date(hoje.getFullYear(), s*6+6, 0); }
-    else { dataInicio = new Date(hoje.getFullYear(), 0, 1); dataFim = new Date(hoje.getFullYear(), 11, 31); }
+    if (dataInicioCustom || dataFimCustom) {
+        dataInicio = dataInicioCustom ? parseDataLocal(dataInicioCustom) : new Date(2000,0,1);
+        dataFim = dataFimCustom ? parseDataLocal(dataFimCustom) : new Date(hoje.getFullYear()+1,0,1);
+    } else {
+        const periodo = document.getElementById('filtroRelatorio').value;
+        if (periodo === 'mes') { dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1); dataFim = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0); }
+        else if (periodo === 'trimestre') { const t = Math.floor(hoje.getMonth()/3); dataInicio = new Date(hoje.getFullYear(), t*3, 1); dataFim = new Date(hoje.getFullYear(), t*3+3, 0); }
+        else if (periodo === 'semestre') { const s = Math.floor(hoje.getMonth()/6); dataInicio = new Date(hoje.getFullYear(), s*6, 1); dataFim = new Date(hoje.getFullYear(), s*6+6, 0); }
+        else { dataInicio = new Date(hoje.getFullYear(), 0, 1); dataFim = new Date(hoje.getFullYear(), 11, 31); }
+    }
 
     let totalEntrada = 0, totalSaida = 0;
     data.financeiro.forEach(f => {
@@ -2425,63 +2595,64 @@ function gerarRelatorio() {
     });
 }
 
-function gerarRelatorioRotas() {
-    document.getElementById('rotasFixasRelatorio').innerHTML = renderRotasFixasPerformance();
-    const filtroRota = document.getElementById('filtroRotaRelatorio')?.value || '';
-    let rotasFiltradas = data.rotas;
-    if (filtroRota) rotasFiltradas = rotasFiltradas.filter(r => r.id === filtroRota);
-    document.getElementById('rotasGastoTable').innerHTML = rotasFiltradas.map(r => {
-        const g = gastoRotaDetalhado(r);
-        const kmP = kmPercorrido(r);
-        const custoPorKm = kmP > 0 ? (g.total/kmP).toFixed(2) : 0;
-        const rotaFixa = data.rotas_fixas.find(rf => rf.id === r.rota_fixa_id)?.nome || '-';
-        return `<tr><td>${veiculoPlaca(r.veiculo_id)}</td><td>${motoristaNome(r.motorista_id)}</td><td>${rotaFixa}</td><td>${r.local_saida}</td><td>${r.destino}</td>
-        <td>${formatarData(r.data_inicio)}</td><td>${tempoTotal(r)}</td><td>${kmP} km</td>
-        <td>R$ ${g.combustivel.toFixed(2)}</td><td>R$ ${g.manutencao.toFixed(2)}</td><td>R$ ${g.multas.toFixed(2)}</td>
-        <td><strong>R$ ${g.total.toFixed(2)}</strong></td><td>R$ ${custoPorKm}/km</td></tr>`;
-    }).join('');
+function limparFiltrosRelatorio() {
+    document.getElementById('filtroRelatorioDataInicio').value = '';
+    document.getElementById('filtroRelatorioDataFim').value = '';
+    gerarRelatorio();
+    gerarRelatorioTurismo();
 }
 
 function gerarRelatorioTurismo() {
-    const totalViagens = data.turismo_viagens.length;
-    const totalFaturado = data.turismo_viagens.reduce((s,vg) => s + Number(vg.valor_viagem||0), 0);
-    const totalPedagio = data.turismo_viagens.reduce((s,vg) => s + Number(vg.valor_pedagio||0), 0);
-    const totalCombustivel = data.turismo_viagens.reduce((s,vg) => s + Number(vg.combustivel_valor||0), 0);
-    const totalDiarias = data.turismo_viagens.reduce((s,vg) => s + Number(vg.valor_diaria||0), 0);
-    const totalOutros = data.turismo_viagens.reduce((s,vg) => s + Number(vg.outros_valor||0), 0);
-    const totalGastoVeiculo = data.turismo_viagens.reduce((s,vg) => s + (vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0), 0);
-    const totalCustos = totalPedagio + totalCombustivel + totalDiarias + totalOutros + totalGastoVeiculo;
-    const totalPendente = data.turismo_viagens.filter(vg => !vg.acerto_motorista_pago).length;
+    const dataInicio = document.getElementById('filtroRelatorioDataInicio')?.value || '';
+    const dataFim = document.getElementById('filtroRelatorioDataFim')?.value || '';
+    const viagens = ordenarPorData(filtrarPorData(data.turismo_viagens, 'data', dataInicio, dataFim), 'data');
+
+    const totalViagens = viagens.length;
+    const totalFaturado = viagens.reduce((s,vg) => s + Number(vg.valor_viagem||0), 0);
+    const totalNotaFiscal = viagens.reduce((s,vg) => s + Number(vg.nota_fiscal_valor||0), 0);
+    const totalImposto = viagens.reduce((s,vg) => s + (Number(vg.nota_fiscal_valor||0) * Number(vg.imposto_percentual||0) / 100), 0);
+    const totalPedagio = viagens.reduce((s,vg) => s + Number(vg.valor_pedagio||0), 0);
+    const totalCombustivel = viagens.reduce((s,vg) => s + Number(vg.combustivel_valor||0), 0);
+    const totalDiarias = viagens.reduce((s,vg) => s + Number(vg.valor_diaria||0), 0);
+    const totalOutros = viagens.reduce((s,vg) => s + Number(vg.outros_valor||0), 0);
+    const totalDepreciacao = viagens.reduce((s,vg) => s + Number(vg.depreciacao||0), 0);
+    const totalAdiantamento = viagens.reduce((s,vg) => s + Number(vg.adiantamento||0), 0);
+    const totalCustos = totalPedagio + totalCombustivel + totalDiarias + totalOutros + totalDepreciacao + totalImposto + totalAdiantamento;
+    const totalPendente = viagens.filter(vg => !vg.acerto_motorista_pago).length;
 
     document.getElementById('resumoTurismoRelatorio').innerHTML = `
         <div class="card"><h3>Viagens</h3><div class="number">${totalViagens}</div></div>
         <div class="card"><h3>Faturado</h3><div class="number">R$ ${totalFaturado.toFixed(2)}</div></div>
-        <div class="card"><h3>Gasto do Veículo</h3><div class="number">R$ ${totalGastoVeiculo.toFixed(2)}</div></div>
+        <div class="card"><h3>Nota Fiscal</h3><div class="number">R$ ${totalNotaFiscal.toFixed(2)}</div></div>
+        <div class="card"><h3>Imposto</h3><div class="number">R$ ${totalImposto.toFixed(2)}</div></div>
+        <div class="card"><h3>Depreciação</h3><div class="number">R$ ${totalDepreciacao.toFixed(2)}</div></div>
+        <div class="card"><h3>Valor Pago aos Motoristas</h3><div class="number">R$ ${totalAdiantamento.toFixed(2)}</div></div>
         <div class="card"><h3>Custos Totais</h3><div class="number">R$ ${totalCustos.toFixed(2)}</div></div>
-        <div class="card"><h3>Lucro Estimado</h3><div class="number">R$ ${(totalFaturado-totalCustos).toFixed(2)}</div></div>
+        <div class="card"><h3>Saldo da Viagem (total)</h3><div class="number">R$ ${(totalFaturado-totalCustos).toFixed(2)}</div></div>
         <div class="card"><h3>Acertos Pendentes</h3><div class="number">${totalPendente}</div></div>
     `;
 
-    document.getElementById('turismoRelatorioTable').innerHTML = data.turismo_viagens.map(vg => {
-        const gastoVeiculo = vg.km ? custoPorKmVeiculo(vg.veiculo_id) * Number(vg.km) : 0;
-        const totalViagem = Number(vg.valor_pedagio||0) + Number(vg.combustivel_valor||0) + Number(vg.valor_diaria||0) + Number(vg.outros_valor||0) + gastoVeiculo;
+    document.getElementById('turismoRelatorioTable').innerHTML = viagens.map(vg => {
+        const impostoValor = Number(vg.nota_fiscal_valor||0) * Number(vg.imposto_percentual||0) / 100;
+        const depreciacao = Number(vg.depreciacao||0);
+        const adiantamento = Number(vg.adiantamento||0);
+        const totalViagem = Number(vg.valor_pedagio||0) + Number(vg.combustivel_valor||0) + Number(vg.valor_diaria||0) + Number(vg.outros_valor||0) + depreciacao + impostoValor + adiantamento;
+        const saldoViagem = Number(vg.valor_viagem||0) - totalViagem;
         return `<tr><td>${formatarData(vg.data)}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
         <td>${motoristaNome(vg.motorista_id)}</td><td>${data.clientes.find(c=>c.id===vg.cliente_id)?.nome || 'N/A'}</td><td>${veiculoPlaca(vg.veiculo_id)}</td>
-        <td>${vg.km || '-'} km</td><td>R$ ${Number(vg.valor_viagem||0).toFixed(2)}</td><td>R$ ${Number(vg.valor_pedagio||0).toFixed(2)}</td>
+        <td>${vg.km || '-'} km</td><td>R$ ${Number(vg.valor_viagem||0).toFixed(2)}</td>
+        <td>R$ ${Number(vg.nota_fiscal_valor||0).toFixed(2)}</td>
+        <td>${Number(vg.imposto_percentual||0).toFixed(2)}% <span style="font-size:11px; color:#666;">(R$ ${impostoValor.toFixed(2)})</span></td>
+        <td>R$ ${Number(vg.valor_pedagio||0).toFixed(2)}</td>
         <td>${vg.combustivel_litros ? Number(vg.combustivel_litros).toFixed(1)+'L / ' : ''}R$ ${Number(vg.combustivel_valor||0).toFixed(2)}</td>
-        <td>R$ ${Number(vg.valor_diaria||0).toFixed(2)}</td><td>${vg.outros_descricao ? vg.outros_descricao+': R$ '+Number(vg.outros_valor||0).toFixed(2) : '-'}</td>
-        <td>R$ ${gastoVeiculo.toFixed(2)}</td>
+        <td>R$ ${Number(vg.valor_diaria||0).toFixed(2)}</td>
+        <td>R$ ${adiantamento.toFixed(2)}</td>
+        <td>${vg.outros_descricao ? vg.outros_descricao+': R$ '+Number(vg.outros_valor||0).toFixed(2) : '-'}</td>
+        <td>R$ ${depreciacao.toFixed(2)}</td>
         <td><strong>R$ ${totalViagem.toFixed(2)}</strong></td>
+        <td><strong>R$ ${saldoViagem.toFixed(2)}</strong></td>
         <td><span class="badge ${vg.acerto_motorista_pago ? 'badge-pago' : 'badge-pendente'}">${vg.acerto_motorista_pago ? 'Pago' : 'Pendente'}</span></td></tr>`;
     }).join('');
-}
-
-function preencherFiltroRotas() {
-    const sel = document.getElementById('filtroRotaRelatorio');
-    if (sel && data.rotas.length > 0) {
-        sel.innerHTML = '<option value="">Todas as Rotas</option>' + data.rotas.map(r =>
-            `<option value="${r.id}">${veiculoPlaca(r.veiculo_id)} - ${motoristaNome(r.motorista_id)} (${r.local_saida} → ${r.destino})</option>`).join('');
-    }
 }
 
 function calcularValorTotal() {
@@ -2513,7 +2684,6 @@ async function loadData() {
     loadBomba();
     loadGalaoOleo();
     preencherFiltroClientesTurismo(); filtrarTurismo();
-    preencherFiltroRotas(); gerarRelatorioRotas();
     preencherFiltroMotivo();
 }
 
