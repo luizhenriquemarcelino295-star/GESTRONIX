@@ -2200,15 +2200,16 @@ function gerarCustoPorRotaFixa(rotasBase) {
         const impostoMensal = Number(rf.nota_fiscal_valor||0) * Number(rf.imposto_percentual||0) / 100;
         const impostoTotal = impostoMensal * meses;
         const saldoFinal = faturamentoTotal - maoDeObraTotal - custoVeiculoHistorico - impostoTotal;
-        return `<tr><td>${rf.nome}</td><td>${rf.local_saida||'-'} → ${rf.local_chegada||'-'}</td>
-        <td>${instancias.length}</td><td>${kmTotal} km</td>
+        const percentualLucro = faturamentoTotal > 0 ? (saldoFinal / faturamentoTotal * 100) : 0;
+        return `<tr><td>${rf.nome}</td><td>${kmTotal} km</td>
         <td>R$ ${custoVeiculoHistorico.toFixed(2)}</td><td>R$ ${maoDeObraMensal.toFixed(2)}/mês</td><td>${meses}</td>
         <td>R$ ${maoDeObraTotal.toFixed(2)}</td>
         <td><strong>R$ ${custoTotal.toFixed(2)}</strong></td><td><strong>R$ ${custoRealPorKm.toFixed(2)}/km</strong></td>
         <td>R$ ${faturamentoTotal.toFixed(2)}</td>
         <td>${Number(rf.imposto_percentual||0).toFixed(2)}% <span style="font-size:11px; color:#666;">(R$ ${impostoTotal.toFixed(2)})</span></td>
-        <td><strong>R$ ${saldoFinal.toFixed(2)}</strong></td></tr>`;
-    }).join('') || '<tr><td colspan="13" style="color:#666;">Nenhuma rota fixa cadastrada. Vá em Rotas → "Nova Rota Fixa" e preencha os valores mensais de mão de obra.</td></tr>';
+        <td><strong>R$ ${saldoFinal.toFixed(2)}</strong></td>
+        <td><strong style="color:${percentualLucro >= 0 ? '#4caf50' : '#e53935'};">${percentualLucro.toFixed(1)}%</strong></td></tr>`;
+    }).join('') || '<tr><td colspan="12" style="color:#666;">Nenhuma rota fixa cadastrada. Vá em Rotas → "Nova Rota Fixa" e preencha os valores mensais de mão de obra.</td></tr>';
 }
 
 function limparFiltroMedias() {
@@ -2619,6 +2620,7 @@ function gerarRelatorioTurismo() {
     const totalAdiantamento = viagens.reduce((s,vg) => s + Number(vg.adiantamento||0), 0);
     const totalCustos = totalPedagio + totalCombustivel + totalDiarias + totalOutros + totalDepreciacao + totalImposto + totalAdiantamento;
     const totalPendente = viagens.filter(vg => !vg.acerto_motorista_pago).length;
+    const margemLucroTotal = totalFaturado > 0 ? ((totalFaturado - totalCustos) / totalFaturado * 100) : 0;
 
     document.getElementById('resumoTurismoRelatorio').innerHTML = `
         <div class="card"><h3>Viagens</h3><div class="number">${totalViagens}</div></div>
@@ -2629,6 +2631,7 @@ function gerarRelatorioTurismo() {
         <div class="card"><h3>Valor Pago aos Motoristas</h3><div class="number">R$ ${totalAdiantamento.toFixed(2)}</div></div>
         <div class="card"><h3>Custos Totais</h3><div class="number">R$ ${totalCustos.toFixed(2)}</div></div>
         <div class="card"><h3>Saldo da Viagem (total)</h3><div class="number">R$ ${(totalFaturado-totalCustos).toFixed(2)}</div></div>
+        <div class="card"><h3>Margem de Lucro</h3><div class="number">${margemLucroTotal.toFixed(1)}%</div></div>
         <div class="card"><h3>Acertos Pendentes</h3><div class="number">${totalPendente}</div></div>
     `;
 
@@ -2638,6 +2641,7 @@ function gerarRelatorioTurismo() {
         const adiantamento = Number(vg.adiantamento||0);
         const totalViagem = Number(vg.valor_pedagio||0) + Number(vg.combustivel_valor||0) + Number(vg.valor_diaria||0) + Number(vg.outros_valor||0) + depreciacao + impostoValor + adiantamento;
         const saldoViagem = Number(vg.valor_viagem||0) - totalViagem;
+        const percentualLucro = Number(vg.valor_viagem||0) > 0 ? (saldoViagem / Number(vg.valor_viagem) * 100) : 0;
         return `<tr><td>${formatarData(vg.data)}</td><td>${vg.local_saida}</td><td>${vg.local_chegada}</td>
         <td>${motoristaNome(vg.motorista_id)}</td><td>${data.clientes.find(c=>c.id===vg.cliente_id)?.nome || 'N/A'}</td><td>${veiculoPlaca(vg.veiculo_id)}</td>
         <td>${vg.km || '-'} km</td><td>R$ ${Number(vg.valor_viagem||0).toFixed(2)}</td>
@@ -2651,6 +2655,7 @@ function gerarRelatorioTurismo() {
         <td>R$ ${depreciacao.toFixed(2)}</td>
         <td><strong>R$ ${totalViagem.toFixed(2)}</strong></td>
         <td><strong>R$ ${saldoViagem.toFixed(2)}</strong></td>
+        <td><strong style="color:${percentualLucro >= 0 ? '#4caf50' : '#e53935'};">${percentualLucro.toFixed(1)}%</strong></td>
         <td><span class="badge ${vg.acerto_motorista_pago ? 'badge-pago' : 'badge-pendente'}">${vg.acerto_motorista_pago ? 'Pago' : 'Pendente'}</span></td></tr>`;
     }).join('');
 }
