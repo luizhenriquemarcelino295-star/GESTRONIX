@@ -331,6 +331,30 @@ async function recalcularKmVeiculo(veiculoId) {
     await sb.from('veiculos').update({ km_atual: maiorKm }).eq('id', veiculoId);
 }
 
+async function recalcularMediaKmLVeiculo(veiculoId) {
+    if (!veiculoId) return;
+    const doVeiculo = data.abastecimentos
+        .filter(a => a.veiculo_id === veiculoId)
+        .map(a => ({ ...a, _dataParsed: parseDataLocal(a.data) }))
+        .sort((a, b) => (a._dataParsed - b._dataParsed) || (Number(a.km) - Number(b.km)));
+
+    const atualizacoes = [];
+    for (let i = 0; i < doVeiculo.length; i++) {
+        const atual = doVeiculo[i];
+        let kmlCorreto = 0;
+        if (i > 0) {
+            const diff = Number(atual.km) - Number(doVeiculo[i - 1].km);
+            kmlCorreto = diff > 0 ? diff / Number(atual.litros) : 0;
+        }
+        if (Number(atual.kml || 0).toFixed(4) !== kmlCorreto.toFixed(4)) {
+            atualizacoes.push({ id: atual.id, kml: kmlCorreto });
+        }
+    }
+    for (const upd of atualizacoes) {
+        await sb.from('abastecimentos').update({ kml: upd.kml }).eq('id', upd.id);
+    }
+}
+
 function nivelBomba() {
     const totalCarregado = data.bomba_cargas.reduce((s,c) => s + Number(c.litros), 0);
     const totalDispensado = data.abastecimentos.filter(a => a.fonte === 'bomba').reduce((s,a) => s + Number(a.litros), 0);
@@ -1077,7 +1101,12 @@ async function addAbastecimento() {
     }
 
     let kml = 0;
-    const anteriores = data.abastecimentos.filter(a => a.veiculo_id === veiculo_id && a.id !== editContext?.id).sort((a,b) => new Date(b.data) - new Date(a.data));
+    const dataAtualParsed = parseDataLocal(data_abast);
+    const anteriores = data.abastecimentos
+        .filter(a => a.veiculo_id === veiculo_id && a.id !== editContext?.id)
+        .map(a => ({ ...a, _dataParsed: parseDataLocal(a.data) }))
+        .filter(a => a._dataParsed && dataAtualParsed && (a._dataParsed < dataAtualParsed || (a._dataParsed.getTime() === dataAtualParsed.getTime() && Number(a.km) < km)))
+        .sort((a, b) => b._dataParsed - a._dataParsed || Number(b.km) - Number(a.km));
     if (anteriores.length > 0) { const diff = km - anteriores[0].km; kml = diff > 0 ? diff / litros : 0; }
 
     const payload = { veiculo_id, fonte, data: data_abast, km, litros, valor_litro, valor_total, kml };
@@ -1085,7 +1114,7 @@ async function addAbastecimento() {
         ? await sb.from('abastecimentos').update(payload).eq('id', editContext.id)
         : await sb.from('abastecimentos').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
-    closeModal(); await loadData(); await recalcularKmVeiculo(veiculo_id); await loadData(); updateDashboard();
+    closeModal(); await loadData(); await recalcularKmVeiculo(veiculo_id); await recalcularMediaKmLVeiculo(veiculo_id); await loadData(); updateDashboard();
 }
 
 async function addPneu() {
@@ -2387,7 +2416,11 @@ async function deleteItem(type, id) {
     const { error } = await sb.from(type).delete().eq('id', id);
     if (error) { alertErro(error); return; }
     await loadData();
-    if (veiculoAfetado) { await recalcularKmVeiculo(veiculoAfetado); await loadData(); }
+    if (veiculoAfetado) {
+        await recalcularKmVeiculo(veiculoAfetado);
+        if (type === 'abastecimentos') { await recalcularMediaKmLVeiculo(veiculoAfetado); await loadData(); }
+        await loadData();
+    }
     updateDashboard();
     if (type === 'agenda') loadAgenda();
     if (type === 'turismo_viagens') filtrarTurismo();
