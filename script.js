@@ -6,15 +6,213 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentUser = null;
 let currentEmpresa = null;
 let currentUserRole = 'admin';
+let saldoAutomatico = false; // true quando o gatilho de saldo do banco (seguranca_banco.sql) está ativo
 let chartGastos = null, chartCategorias = null, chartRelatorio = null;
 let editContext = null; // { type: 'motorista', id: '...' } quando editando, null quando adicionando
 let data = {
     motoristas: [], funcionarios: [], veiculos: [], clientes: [],
     abastecimentos: [], pneus: [], oleos: [], preventivas: [], corretivas: [], multas: [],
     bancos: [], financeiro: [], rotas: [],
-    produtos: [], estoque_movimentacoes: [], agenda: [], turismo_viagens: [],
+    produtos: [], estoque_movimentacoes: [], agenda: [], turismo_viagens: [], escala_rotas: [],
     rotas_fixas: [], financeiro_categorias: [], bomba_cargas: [], contas_pagar: [], contas_receber: [], galao_oleo_cargas: [],
 };
+
+
+// ==== UI HELPERS (avisos, confirmações e escolhas dentro do próprio sistema) ====
+(function injetarEstilosUI() {
+    if (document.getElementById('ui-extra-css')) return;
+    const css = `
+    .ui-toast-box { position: fixed; top: 16px; right: 16px; z-index: 100000; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
+    .ui-toast { padding: 12px 14px; border-radius: 8px; color: #fff; font-size: 14px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0,0,0,.25); cursor: pointer; animation: ui-in .18s ease; }
+    .ui-toast.erro { background: #c62828; } .ui-toast.aviso { background: #ef6c00; }
+    .ui-toast.ok { background: #2e7d32; } .ui-toast.info { background: #0066cc; }
+    @keyframes ui-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+    .ui-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 100001; padding: 16px; }
+    .ui-dialog { background: #fff; border-radius: 12px; padding: 22px; width: 100%; max-width: 420px; box-shadow: 0 20px 60px rgba(0,0,0,.3); max-height: 90vh; overflow-y: auto; }
+    .ui-dialog.largo { max-width: 760px; }
+    .ui-dialog h3 { margin: 0 0 10px; font-size: 17px; color: #222; }
+    .ui-dialog p { margin: 0 0 14px; color: #444; white-space: pre-line; font-size: 14px; line-height: 1.45; }
+    .ui-dialog input[type=text], .ui-dialog select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; margin-bottom: 14px; box-sizing: border-box; }
+    .ui-dialog .ui-btns { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+    .ui-dialog button { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px; }
+    .ui-btn-ok { background: #0066cc; color: #fff; } .ui-btn-cancel { background: #e0e0e0; color: #333; } .ui-btn-danger { background: #c62828; color: #fff; }
+    .campo-invalido { border-color: #c62828 !important; box-shadow: 0 0 0 2px rgba(198,40,40,.15); }
+    `;
+    const st = document.createElement('style'); st.id = 'ui-extra-css'; st.textContent = css; document.head.appendChild(st);
+})();
+
+function toast(msg, tipo = 'info', ms = 5000) {
+    let box = document.getElementById('ui-toast-box');
+    if (!box) { box = document.createElement('div'); box.id = 'ui-toast-box'; box.className = 'ui-toast-box'; document.body.appendChild(box); }
+    const el = document.createElement('div');
+    el.className = 'ui-toast ' + tipo; el.textContent = msg; el.setAttribute('role', 'alert');
+    el.onclick = () => el.remove();
+    box.appendChild(el);
+    setTimeout(() => el.remove(), ms);
+}
+function avisar(msg) { toast(msg, 'aviso', 6500); }
+
+// Diálogo genérico: devolve uma Promise com o valor escolhido (ou null se cancelar)
+function _dialogo({ titulo = '', texto = '', campo = null, opcoes = null, okLabel = 'OK', cancelLabel = 'Cancelar', perigo = false, semCancelar = false }) {
+    return new Promise(resolve => {
+        const anterior = document.activeElement;
+        const ov = document.createElement('div'); ov.className = 'ui-overlay';
+        const box = document.createElement('div'); box.className = 'ui-dialog'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true');
+        const h = document.createElement('h3'); h.textContent = titulo; if (titulo) box.appendChild(h);
+        const p = document.createElement('p'); p.textContent = texto; box.appendChild(p);
+        let entrada = null;
+        if (campo !== null) { entrada = document.createElement('input'); entrada.type = 'text'; entrada.value = campo; box.appendChild(entrada); }
+        if (opcoes) {
+            entrada = document.createElement('select');
+            opcoes.forEach(o => { const op = document.createElement('option'); op.value = o.valor; op.textContent = o.rotulo; entrada.appendChild(op); });
+            box.appendChild(entrada);
+        }
+        const btns = document.createElement('div'); btns.className = 'ui-btns';
+        const fechar = (valor) => { document.removeEventListener('keydown', teclas, true); ov.remove(); if (anterior && anterior.focus) try { anterior.focus(); } catch (e) {} resolve(valor); };
+        if (!semCancelar) {
+            const bc = document.createElement('button'); bc.type = 'button'; bc.className = 'ui-btn-cancel'; bc.textContent = cancelLabel;
+            bc.onclick = () => fechar(null); btns.appendChild(bc);
+        }
+        const bo = document.createElement('button'); bo.type = 'button'; bo.className = perigo ? 'ui-btn-danger' : 'ui-btn-ok'; bo.textContent = okLabel;
+        bo.onclick = () => fechar(entrada ? entrada.value : true); btns.appendChild(bo);
+        box.appendChild(btns); ov.appendChild(box); document.body.appendChild(ov);
+        function teclas(e) {
+            if (e.key === 'Escape') { e.stopPropagation(); fechar(null); }
+            else if (e.key === 'Enter' && (!entrada || document.activeElement === entrada || entrada.tagName === 'SELECT')) { e.preventDefault(); bo.click(); }
+        }
+        document.addEventListener('keydown', teclas, true);
+        (entrada || bo).focus(); if (entrada && entrada.select) entrada.select();
+    });
+}
+async function confirmar(texto, { titulo = 'Confirmar', okLabel = 'Confirmar', perigo = false } = {}) {
+    const r = await _dialogo({ titulo, texto, okLabel, perigo });
+    return r === true;
+}
+async function perguntar(texto, valorPadrao = '', titulo = 'Informe') {
+    const r = await _dialogo({ titulo, texto, campo: valorPadrao, okLabel: 'OK' });
+    return r === null ? null : String(r).trim() || null;
+}
+async function escolherBanco(titulo, texto) {
+    if (!data.bancos.length) { avisar('Cadastre um banco primeiro.'); return null; }
+    const opcoes = data.bancos.map(b => ({ valor: b.id, rotulo: `${b.nome} — saldo R$ ${Number(b.saldo || 0).toFixed(2)}` }));
+    const id = await _dialogo({ titulo, texto, opcoes, okLabel: 'Confirmar' });
+    return id ? data.bancos.find(b => String(b.id) === String(id)) || null : null;
+}
+
+// Mensagens de erro em português claro (em vez do texto técnico do banco)
+function mensagemErroAmigavel(error) {
+    const msg = String(error?.message || error || '');
+    const code = String(error?.code || '');
+    if (!navigator.onLine || /Failed to fetch|NetworkError|Load failed/i.test(msg)) return 'Sem conexão com a internet. Verifique a rede e tente de novo.';
+    if (/JWT expired|Invalid Refresh Token|not authenticated/i.test(msg)) return 'Sua sessão expirou. Saia e entre novamente.';
+    if (code === '42501' || /row-level security|permission denied/i.test(msg)) return 'Você não tem permissão para fazer essa ação. Fale com o administrador.';
+    if (code === '23505' || /duplicate key/i.test(msg)) return 'Já existe um registro com esses dados.';
+    if (code === '23503' || /foreign key/i.test(msg)) return 'Não é possível concluir: esse registro está ligado a outros dados do sistema.';
+    if (code === '23502' || /null value in column/i.test(msg)) { const c = msg.match(/column "([^"]+)"/)?.[1]; return `Falta preencher um campo obrigatório${c ? ' (' + c + ')' : ''}.`; }
+    if (code === '22P02' || /invalid input syntax/i.test(msg)) return 'Algum campo foi preenchido com um valor inválido. Confira os dados e tente de novo.';
+    if (code === '22003' || /numeric field overflow|out of range/i.test(msg)) return 'Um dos valores digitados é grande demais.';
+    if (code === 'PGRST204' || code === '42703' || /Could not find the '.*' column|column .* does not exist/i.test(msg)) {
+        const c = msg.match(/'([^']+)' column/)?.[1] || msg.match(/column "?([A-Za-z0-9_]+)"?/)?.[1];
+        return `O banco de dados ainda não tem a coluna${c ? ' "' + c + '"' : ''}. Rode o arquivo alteracoes_banco.sql no Supabase (SQL Editor) e tente de novo.`;
+    }
+    if (code === '42P01' || /relation .* does not exist|Could not find the table/i.test(msg)) return 'Falta criar uma tabela no banco de dados. Rode o arquivo seguranca_banco.sql no Supabase (SQL Editor).';
+    return 'Não foi possível concluir a ação. ' + (msg ? '(' + msg + ')' : 'Tente novamente.');
+}
+function alertErro(error) { console.error(error); toast(mensagemErroAmigavel(error), 'erro', 9000); }
+
+// ==== VALIDAÇÕES E MÁSCARAS ====
+function somenteDigitos(s) { return String(s || '').replace(/\D/g, ''); }
+function validarCPF(valor) {
+    const d = somenteDigitos(valor);
+    if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+    for (let t = 9; t < 11; t++) {
+        let soma = 0; for (let i = 0; i < t; i++) soma += Number(d[i]) * (t + 1 - i);
+        const dig = ((soma * 10) % 11) % 10; if (dig !== Number(d[t])) return false;
+    }
+    return true;
+}
+function validarCNPJ(valor) {
+    const d = somenteDigitos(valor);
+    if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+    const calc = (base) => { let soma = 0, peso = base.length - 7; for (let i = 0; i < base.length; i++) { soma += Number(base[i]) * peso--; if (peso < 2) peso = 9; } const r = soma % 11; return r < 2 ? 0 : 11 - r; };
+    return calc(d.slice(0, 12)) === Number(d[12]) && calc(d.slice(0, 13)) === Number(d[13]);
+}
+function validarCpfCnpj(valor) { const d = somenteDigitos(valor); return d.length === 11 ? validarCPF(d) : d.length === 14 ? validarCNPJ(d) : false; }
+function validarPlaca(valor) { const p = String(valor || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return /^[A-Z]{3}\d{4}$/.test(p) || /^[A-Z]{3}\d[A-Z]\d{2}$/.test(p); }
+function validarTelefone(valor) { const n = somenteDigitos(valor).length; return n === 10 || n === 11; }
+
+function marcarCampoInvalido(id, msg) {
+    const el = document.getElementById(id);
+    if (el) { el.classList.add('campo-invalido'); el.focus(); el.addEventListener('input', () => el.classList.remove('campo-invalido'), { once: true }); }
+    avisar(msg);
+    return false;
+}
+// Validação "suave": avisa e deixa o usuário decidir se salva mesmo assim (dados antigos/atípicos)
+async function validarOuConfirmar(ok, id, msg) {
+    if (ok) return true;
+    const el = document.getElementById(id); if (el) el.classList.add('campo-invalido');
+    return await confirmar(msg + '\n\nSalvar mesmo assim?', { titulo: 'Confira o dado', okLabel: 'Salvar mesmo assim' });
+}
+
+function mascaraCPF(v) { const d = somenteDigitos(v).slice(0, 11); return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2'); }
+function mascaraCpfCnpj(v) {
+    const d = somenteDigitos(v).slice(0, 14);
+    if (d.length <= 11) return mascaraCPF(d);
+    return d.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
+}
+function mascaraTelefone(v) {
+    const d = somenteDigitos(v).slice(0, 11);
+    if (d.length <= 2) return d ? '(' + d : '';
+    if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+    if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+function mascaraCEP(v) { const d = somenteDigitos(v).slice(0, 8); return d.length > 5 ? d.slice(0, 5) + '-' + d.slice(5) : d; }
+function mascaraPlaca(v) { return String(v || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 8); }
+const MASCARAS_CAMPOS = {
+    motoristaCPF: mascaraCPF, funcionarioCPF: mascaraCPF, clienteCPF: mascaraCpfCnpj,
+    motoristaTelefone: mascaraTelefone, funcionarioTelefone: mascaraTelefone, clienteTelefone: mascaraTelefone,
+    clienteCep: mascaraCEP, veiculoPlaca: mascaraPlaca
+};
+['input', 'focusin'].forEach(evento => document.addEventListener(evento, e => {
+    const fn = MASCARAS_CAMPOS[e.target && e.target.id];
+    if (fn) { const novo = fn(e.target.value); if (novo !== e.target.value) e.target.value = novo; }
+}));
+
+// Data de hoje no fuso local (toISOString usa UTC e vira "amanhã" à noite no Brasil)
+function hojeISO() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+
+// ==== PERMISSÕES POR PERFIL ====
+// admin: tudo | financeiro: parte financeira + consulta | operacional: dia a dia da frota
+const PERMISSOES_PAGINAS = {
+    admin: null,
+    financeiro: ['dashboard', 'agenda', 'controle', 'turismo', 'clientes', 'financeiro', 'bancos', 'multas', 'desempenho', 'relatorios', 'dre', 'aniversarios'],
+    operacional: ['dashboard', 'agenda', 'controle', 'rotas', 'turismo', 'clientes', 'veiculos', 'estoque', 'manutencoes', 'multas', 'aniversarios']
+};
+function paginaPermitida(pagina) {
+    if (pagina === 'configuracoes') return currentUserRole === 'admin';
+    const lista = PERMISSOES_PAGINAS[currentUserRole];
+    return !lista || lista.includes(pagina);
+}
+
+// ==== ANEXOS: botão 📎 nas tabelas (a janela em si fica em modulos.js) ====
+const ANEXO_TITULOS = {
+    veiculos: i => i.placa, motoristas: i => i.nome, clientes: i => i.nome, funcionarios: i => i.nome,
+    financeiro: i => i.descricao || i.motivo, turismo_viagens: i => `${i.local_saida} → ${i.local_chegada}`,
+    multas: i => i.descricao, contas_pagar: i => i.fornecedor, contas_receber: i => i.descricao,
+    pneus: i => `${veiculoPlaca(i.veiculo_id)} — ${formatarData(i.data)}`, oleos: i => `${veiculoPlaca(i.veiculo_id)} — ${formatarData(i.data)}`,
+    preventivas: i => `${veiculoPlaca(i.veiculo_id)} — ${formatarData(i.data)}`, corretivas: i => `${veiculoPlaca(i.veiculo_id)} — ${formatarData(i.data)}`,
+    abastecimentos: i => `${veiculoPlaca(i.veiculo_id)} — ${formatarData(i.data)}`
+};
+function btnAnexos(chave, item) {
+    const titulo = (ANEXO_TITULOS[chave] ? ANEXO_TITULOS[chave](item) : '') || chave;
+    const esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    return `<button class="btn-small" style="background:#607d8b;" title="Anexos (notas, comprovantes, documentos)" data-ent="${chave}" data-id="${item.id}" data-titulo="${esc(titulo)}" onclick="abrirAnexosBtn(this)">📎</button>`;
+}
+function abrirAnexosBtn(el) {
+    if (typeof abrirAnexos === 'function') abrirAnexos(el.dataset.ent, el.dataset.id, el.dataset.titulo);
+    else avisar('O módulo de anexos não foi carregado (confira se o arquivo modulos.js está na pasta).');
+}
 
 // ==== AUTENTICAÇÃO ====
 async function checkAuth() {
@@ -30,20 +228,27 @@ async function checkAuth() {
 
     currentEmpresa = { id: perfil.empresa_id, nome: perfil.empresas.nome, bomba_alerta_minimo: perfil.empresas.bomba_alerta_minimo, galao_oleo_alerta_minimo: perfil.empresas.galao_oleo_alerta_minimo };
     currentUserRole = perfil.role || 'admin';
+    if (currentUserRole === 'operador') currentUserRole = 'operacional';
+    try { const { data: sa, error: saErr } = await sb.rpc('saldo_automatico'); saldoAutomatico = !saErr && sa === true; } catch (e) { saldoAutomatico = false; }
     document.getElementById('userEmail').textContent = currentUser.email;
     document.getElementById('empresaNome').textContent = `(${currentEmpresa.nome})`;
     aplicarPermissoes();
     await loadData();
     updateDashboard();
+    window.__appPronto = true;
+    if (typeof iniciarModulos === 'function') iniciarModulos();
 }
 
 function aplicarPermissoes() {
-    if (currentUserRole === 'admin') return;
-    // operador não vê Financeiro, Bancos nem Relatórios no menu
-    ['financeiro', 'bancos', 'relatorios'].forEach(page => {
-        const item = [...document.querySelectorAll('.menu-item')].find(el => el.getAttribute('onclick') === `showPage('${page}')`);
-        if (item) item.style.display = 'none';
+    // esconde do menu o que o perfil não pode usar (a trava de verdade fica nas regras do banco: seguranca_banco.sql)
+    document.querySelectorAll('.menu-item').forEach(item => {
+        const m = (item.getAttribute('onclick') || '').match(/showPage\('(\w+)'\)/);
+        if (m && !paginaPermitida(m[1])) item.style.display = 'none';
     });
+    if (currentUserRole !== 'admin' && currentUserRole !== 'financeiro') {
+        // quem não vê funcionários/financeiro receberia contagens e totais parciais: esconde esses cartões
+        ['countFuncionarios', 'totalGasto'].forEach(id => { const card = document.getElementById(id)?.closest('.card'); if (card) card.style.display = 'none'; });
+    }
 }
 
 function showLoginPage() {
@@ -116,6 +321,7 @@ async function logout() { await sb.auth.signOut(); location.reload(); }
 
 // ==== NAVEGAÇÃO ====
 function showPage(page) {
+    if (!paginaPermitida(page)) { avisar('Você não tem acesso a essa área.'); return; }
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(page).classList.add('active');
     document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active'));
@@ -126,6 +332,9 @@ function showPage(page) {
     else if (page === 'desempenho') loadDesempenho();
     else if (page === 'relatorios') setTimeout(() => { gerarRelatorio(); gerarRelatorioTurismo(); }, 100);
     else if (page === 'agenda') loadAgenda();
+    else if (page === 'controle') loadControleRotas();
+    else if (page === 'dre' && typeof gerarDRE === 'function') gerarDRE();
+    else if (page === 'configuracoes' && typeof abrirConfiguracoes === 'function') abrirConfiguracoes();
 }
 
 function switchTab(tab) {
@@ -138,6 +347,9 @@ function switchTab(tab) {
     if (tab === 'galaoOleo') loadGalaoOleo();
     if (tab === 'mediasManutencao') gerarRelatorioMedias();
     if (tab === 'custosVeiculos') gerarCustosVeiculos();
+    if (tab === 'cfgUsuarios' && typeof carregarUsuarios === 'function') carregarUsuarios();
+    if (tab === 'cfgAuditoria' && typeof carregarAuditoria === 'function') carregarAuditoria();
+    if (tab === 'cfgBackup' && typeof atualizarPreviewLogo === 'function') atualizarPreviewLogo();
 }
 
 // ==== EXPORTAR EXCEL ====
@@ -154,7 +366,9 @@ const EXPORT_CONFIG = {
     ]},
     veiculos: { titulo: 'Veiculos', campos: [
         ['placa','Placa'], ['marca','Marca'], ['modelo','Modelo'], ['ano','Ano'], ['chassi','Chassi'], ['renavam','Renavam'], ['numero_bancos','Número de Bancos'],
-        ['km_atual','KM Atual'], ['valor','Valor do Veículo'], ['csv_validade','Validade CSV'], ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
+        ['km_atual','KM Atual'], ['valor','Valor do Veículo'], ['tanque_litros','Tamanho do Tanque (L)'],
+        [item => { const c = combustivelEstimadoTanque(item.id); return c ? c.litros.toFixed(0) + ' L (' + c.percentual.toFixed(0) + '%)' : ''; }, 'Combustível Estimado'],
+        ['csv_validade','Validade CSV'], ['tacografo_validade','Validade Tacógrafo'], ['apolice_validade','Validade Apólice'], ['crlv_ano','Ano CRLV']
     ]},
     clientes: { titulo: 'Clientes', campos: [
         ['nome','Nome'], ['cpf_cnpj','CPF/CNPJ'], ['telefone','Telefone'], ['rua','Rua'], ['numero','Número'],
@@ -243,11 +457,11 @@ function exportarExcel(tipo) {
         config.campos.forEach(([campo, label]) => { linha[label] = typeof campo === 'function' ? campo(item) : item[campo]; });
         return linha;
     });
-    if (linhas.length === 0) { alert('Não há dados para exportar nessa seção ainda.'); return; }
+    if (linhas.length === 0) { avisar('Não há dados para exportar nessa seção ainda.'); return; }
     const ws = XLSX.utils.json_to_sheet(linhas);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, config.titulo.substring(0, 31));
-    XLSX.writeFile(wb, `${config.titulo}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    XLSX.writeFile(wb, `${config.titulo}_${hojeISO()}.xlsx`);
 }
 
 // ==== HELPERS ====
@@ -268,6 +482,37 @@ function parseDataLocal(dataStr) {
 }
 function veiculoPlaca(id) { return data.veiculos.find(v => v.id === id)?.placa || 'N/A'; }
 function veiculoKmAtual(id) { return Number(data.veiculos.find(v => v.id === id)?.km_atual || 0); }
+
+// Estima quanto combustível ainda tem no tanque, considerando que cada abastecimento enche o tanque
+// (premissa padrão em frotas: o motorista sempre completa o tanque ao abastecer) e descontando o
+// consumo estimado desde o último abastecimento, com base na média de km/l do próprio veículo.
+function combustivelEstimadoTanque(veiculoId) {
+    const vv = data.veiculos.find(x => x.id === veiculoId);
+    if (!vv || !vv.tanque_litros) return null; // sem tamanho de tanque cadastrado
+
+    const abastecimentosVeiculo = data.abastecimentos
+        .filter(a => a.veiculo_id === veiculoId)
+        .map(a => ({ ...a, _dataParsed: parseDataLocal(a.data) }))
+        .sort((a, b) => (b._dataParsed - a._dataParsed) || (Number(b.km) - Number(a.km)));
+
+    if (abastecimentosVeiculo.length === 0) return null; // sem histórico de abastecimento ainda
+
+    const ultimo = abastecimentosVeiculo[0];
+    const kmAtual = Number(vv.km_atual || ultimo.km);
+    const kmRodadoDesdeAbastecimento = Math.max(0, kmAtual - Number(ultimo.km));
+
+    // Média de km/l: usa a do próprio último abastecimento se fizer sentido, senão a média geral do veículo
+    const comMedia = abastecimentosVeiculo.filter(a => Number(a.kml) > 0);
+    let mediaKmL = Number(ultimo.kml) > 0 ? Number(ultimo.kml) : 0;
+    if (!mediaKmL && comMedia.length > 0) mediaKmL = comMedia.reduce((s,a) => s + Number(a.kml), 0) / comMedia.length;
+
+    const tanque = Number(vv.tanque_litros);
+    const consumoEstimado = mediaKmL > 0 ? kmRodadoDesdeAbastecimento / mediaKmL : 0;
+    const nivelEstimado = Math.max(0, Math.min(tanque, tanque - consumoEstimado));
+
+    return { litros: nivelEstimado, tanque, percentual: (nivelEstimado / tanque) * 100, semMediaConfiavel: mediaKmL === 0 };
+}
+
 function motoristaNome(id) { return data.motoristas.find(m => m.id === id)?.nome || 'N/A'; }
 function kmPercorrido(r) { return (r.km_fim || 0) - (r.km_inicio || 0); }
 function tempoTotal(r) {
@@ -317,7 +562,6 @@ function gastoRotaDetalhado(r) {
     data.multas.forEach(m => { if (m.veiculo_id===r.veiculo_id && new Date(m.data).toDateString()===dataRota) multas += Number(m.valor||0); });
     return { combustivel, manutencao, multas, total: combustivel + manutencao + multas };
 }
-function alertErro(error) { alert('Erro: ' + (error?.message || 'algo deu errado. Tente novamente.')); }
 
 async function recalcularKmVeiculo(veiculoId) {
     if (!veiculoId) return;
@@ -372,7 +616,7 @@ function nivelGalaoOleo() {
 // abre modal para EDITAR um item já existente (busca na lista e reaproveita o form de adicionar)
 function editarItem(arrayKey, id, modalType) {
     const item = data[arrayKey].find(x => x.id === id);
-    if (!item) { alert('Item não encontrado'); return; }
+    if (!item) { avisar('Item não encontrado'); return; }
     openAddModal(modalType, item);
 }
 
@@ -456,6 +700,7 @@ function openAddModal(type, item = null) {
                 <div class="form-group"><label>Número de Bancos (assentos)</label><input type="number" id="veiculoNumeroBancos" value="${v(item,'numero_bancos')}" placeholder="Ex: 44"></div>
             </div>
             <div class="form-group"><label>Valor do Veículo</label><input type="number" id="veiculoValor" step="0.01" value="${v(item,'valor')}" placeholder="Valor de compra/mercado"></div>
+            <div class="form-group"><label>Tamanho do Tanque (Litros)</label><input type="number" id="veiculoTanqueLitros" step="0.1" value="${v(item,'tanque_litros')}" placeholder="Ex: 300"></div>
             <p style="font-size:12px; color:#666; margin: 5px 0 10px;">Os campos abaixo são opcionais:</p>
             <div class="form-row">
                 <div class="form-group"><label>Validade do CSV</label><input type="date" id="veiculoCsvValidade" value="${v(item,'csv_validade')}"></div>
@@ -813,6 +1058,10 @@ function openAddModal(type, item = null) {
             <div class="form-group"><label>Categoria</label><input type="text" id="agendaCategoria" value="${v(item,'categoria')}"></div>
             <button onclick="addAgenda()">${acaoLabel}</button>
         `;
+    } else if (type === 'escala') {
+        modalTitle.textContent = item ? 'Editar Rota Programada' : 'Programar Rota';
+        html = htmlModalEscala(item);
+        posRender = () => { document.getElementById('escalaVeiculo').value = v(item,'veiculo_id', data.veiculos[0]?.id || ''); document.getElementById('escalaMotorista').value = v(item,'motorista_id'); document.getElementById('escalaRotaFixa').value = v(item,'rota_fixa_id'); };
     } else if (type === 'viagem') {
         modalTitle.textContent = item ? 'Editar Viagem de Turismo' : 'Adicionar Viagem de Turismo';
         const veiculosOptions = data.veiculos.map(vv => `<option value="${vv.id}">${vv.placa}</option>`).join('');
@@ -919,7 +1168,7 @@ function renderListaCategoriasGerenciar() {
 }
 
 async function excluirCategoriaFinanceira(id) {
-    if (!confirm('Excluir essa categoria da lista? Lançamentos que já usam ela continuam normais.')) return;
+    if (!(await confirmar('Excluir essa categoria da lista? Lançamentos que já usam ela continuam normais.', { titulo: 'Excluir categoria', okLabel: 'Excluir', perigo: true }))) return;
     const { error } = await sb.from('financeiro_categorias').delete().eq('id', id);
     if (error) { alertErro(error); return; }
     data.financeiro_categorias = data.financeiro_categorias.filter(c => c.id !== id);
@@ -930,7 +1179,7 @@ async function excluirCategoriaFinanceira(id) {
 async function tratarNovaCategoria() {
     const sel = document.getElementById('financeiroMotivo');
     if (sel.value !== '__nova__') return;
-    const novaCategoria = prompt('Digite o nome da nova categoria:');
+    const novaCategoria = await perguntar('Digite o nome da nova categoria:', '', 'Nova categoria');
     if (!novaCategoria) { sel.value = data.financeiro_categorias[0]?.nome || ''; return; }
     const { error } = await sb.from('financeiro_categorias').insert({ empresa_id: currentEmpresa.id, nome: novaCategoria });
     if (error) { alertErro(error); sel.value = data.financeiro_categorias[0]?.nome || ''; return; }
@@ -962,7 +1211,7 @@ function simularViagem() {
     const notaFiscal = parseFloat(document.getElementById('simNotaFiscal').value) || 0;
     const impostoPercentual = parseFloat(document.getElementById('simImposto').value) || 0;
     const margem = parseFloat(document.getElementById('simMargem').value) || 0;
-    if (!veiculoId || !km) { alert('Selecione o veículo e informe o KM'); return; }
+    if (!veiculoId || !km) { avisar('Selecione o veículo e informe o KM'); return; }
     const custoKm = custoPorKmVeiculo(veiculoId);
     const veiculo = data.veiculos.find(vv => vv.id === veiculoId);
     if (custoKm === 0) {
@@ -1000,7 +1249,10 @@ async function addMotorista() {
     const data_nascimento = document.getElementById('motoristaDataNasc').value;
     const cnh_validade = document.getElementById('motoristaCnhValidade').value || null;
     const salario = parseFloat(document.getElementById('motoristaSalario').value) || null;
-    if (!nome || !cpf || !telefone || !endereco || !data_nascimento) { alert('Preencha todos os campos obrigatórios'); return; }
+    if (!nome || !cpf || !telefone || !endereco || !data_nascimento) { avisar('Preencha todos os campos obrigatórios'); return; }
+    if (parseDataLocal(data_nascimento) > new Date()) return marcarCampoInvalido('motoristaDataNasc', 'A data de nascimento não pode estar no futuro.');
+    if (!(await validarOuConfirmar(validarCPF(cpf), 'motoristaCPF', 'O CPF informado parece inválido.'))) return;
+    if (!(await validarOuConfirmar(validarTelefone(telefone), 'motoristaTelefone', 'O telefone deve ter DDD + número (10 ou 11 dígitos).'))) return;
     const payload = { nome, cpf, telefone, endereco, data_nascimento, cnh_validade, salario };
     const { error } = isEdit
         ? await sb.from('motoristas').update(payload).eq('id', editContext.id)
@@ -1023,7 +1275,12 @@ async function addFuncionario() {
     const data_demissao = document.getElementById('funcionarioDemissao')?.value || null;
     const experiencia_inicio = document.getElementById('funcionarioExpInicio')?.value || null;
     const experiencia_fim = document.getElementById('funcionarioExpFim')?.value || null;
-    if (!nome || !cpf || !telefone || !endereco || !data_nascimento) { alert('Preencha todos os campos obrigatórios'); return; }
+    if (!nome || !cpf || !telefone || !endereco || !data_nascimento) { avisar('Preencha todos os campos obrigatórios'); return; }
+    if (parseDataLocal(data_nascimento) > new Date()) return marcarCampoInvalido('funcionarioDataNasc', 'A data de nascimento não pode estar no futuro.');
+    if (data_admissao && data_demissao && parseDataLocal(data_demissao) < parseDataLocal(data_admissao)) return marcarCampoInvalido('funcionarioDemissao', 'A demissão não pode ser antes da admissão.');
+    if (experiencia_inicio && experiencia_fim && parseDataLocal(experiencia_fim) < parseDataLocal(experiencia_inicio)) return marcarCampoInvalido('funcionarioExpFim', 'O fim da experiência não pode ser antes do início.');
+    if (!(await validarOuConfirmar(validarCPF(cpf), 'funcionarioCPF', 'O CPF informado parece inválido.'))) return;
+    if (!(await validarOuConfirmar(validarTelefone(telefone), 'funcionarioTelefone', 'O telefone deve ter DDD + número (10 ou 11 dígitos).'))) return;
 
     // se preencheu data de demissão, move automaticamente pra "demitido"
     if (data_demissao) status = 'demitido';
@@ -1047,14 +1304,20 @@ async function addVeiculo() {
     const km_atual = parseFloat(document.getElementById('veiculoKmAtual').value) || 0;
     const numero_bancos = parseInt(document.getElementById('veiculoNumeroBancos').value) || null;
     const valor = parseFloat(document.getElementById('veiculoValor').value) || null;
+    const tanque_litros = parseFloat(document.getElementById('veiculoTanqueLitros').value) || null;
     const csv_validade = document.getElementById('veiculoCsvValidade').value || null;
     const csv_valor = parseFloat(document.getElementById('veiculoCsvValor').value) || null;
     const tacografo_validade = document.getElementById('veiculoTacografoValidade').value || null;
     const apolice_validade = document.getElementById('veiculoApoliceValidade').value || null;
     const apolice_valor = parseFloat(document.getElementById('veiculoApoliceValor').value) || null;
     const crlv_ano = document.getElementById('veiculoCrlvAno').value || null;
-    if (!placa || !marca || !modelo || !ano) { alert('Preencha placa, marca, modelo e ano'); return; }
-    const payload = { placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual, numero_bancos, valor, csv_validade, csv_valor, tacografo_validade, apolice_validade, apolice_valor, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null };
+    if (!placa || !marca || !modelo || !ano) { avisar('Preencha placa, marca, modelo e ano'); return; }
+    const anoNum = parseInt(ano);
+    if (!(anoNum >= 1950 && anoNum <= new Date().getFullYear() + 1)) return marcarCampoInvalido('veiculoAno', 'Ano do veículo inválido.');
+    const placaNorm = String(placa).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (data.veiculos.some(x => x.id !== editContext?.id && String(x.placa).toUpperCase().replace(/[^A-Z0-9]/g, '') === placaNorm)) return marcarCampoInvalido('veiculoPlaca', 'Já existe um veículo com essa placa.');
+    if (!(await validarOuConfirmar(validarPlaca(placa), 'veiculoPlaca', 'A placa não está no formato ABC-1234 nem ABC1D23.'))) return;
+    const payload = { placa, marca, modelo, ano: parseInt(ano), chassi, renavam, km_atual, numero_bancos, valor, tanque_litros, csv_validade, csv_valor, tacografo_validade, apolice_validade, apolice_valor, crlv_ano: crlv_ano ? parseInt(crlv_ano) : null };
     const { error } = isEdit
         ? await sb.from('veiculos').update(payload).eq('id', editContext.id)
         : await sb.from('veiculos').insert({ empresa_id: currentEmpresa.id, ...payload });
@@ -1074,6 +1337,10 @@ async function addCliente() {
     const uf = document.getElementById('clienteUf').value;
     const cep = document.getElementById('clienteCep').value;
     const data_nascimento = document.getElementById('clienteDataNasc').value || null;
+    if (!nome) return marcarCampoInvalido('clienteNome', 'Informe o nome do cliente.');
+    if (cpf_cnpj && !(await validarOuConfirmar(validarCpfCnpj(cpf_cnpj), 'clienteCPF', 'O CPF/CNPJ informado parece inválido.'))) return;
+    if (telefone && !(await validarOuConfirmar(validarTelefone(telefone), 'clienteTelefone', 'O telefone deve ter DDD + número (10 ou 11 dígitos).'))) return;
+    if (data_nascimento && parseDataLocal(data_nascimento) > new Date()) return marcarCampoInvalido('clienteDataNasc', 'A data de nascimento não pode estar no futuro.');
     const payload = { nome, cpf_cnpj, telefone, rua, numero, bairro, cidade, uf, cep, data_nascimento };
     const { error } = isEdit
         ? await sb.from('clientes').update(payload).eq('id', editContext.id)
@@ -1091,12 +1358,12 @@ async function addAbastecimento() {
     const litros = parseFloat(document.getElementById('abastecimentoLitros').value);
     const valor_litro = parseFloat(document.getElementById('abastecimentoValorL').value);
     const valor_total = parseFloat(document.getElementById('abastecimentoValorTotal').value);
-    if (!veiculo_id || !data_abast || !km || !litros || !valor_litro) { alert('Preencha todos os campos'); return; }
+    if (!veiculo_id || !data_abast || !km || !litros || !valor_litro) { avisar('Preencha todos os campos'); return; }
 
     if (fonte === 'bomba' && !isEdit) {
         const nivel = nivelBomba();
         if (litros > nivel.atual) {
-            if (!confirm(`A bomba só tem ${nivel.atual.toFixed(0)} L disponíveis. Isso vai deixar o nível negativo. Continuar mesmo assim?`)) return;
+            if (!(await confirmar(`A bomba só tem ${nivel.atual.toFixed(0)} L disponíveis. Isso vai deixar o nível negativo. Continuar mesmo assim?`, { titulo: 'Nível negativo' }))) return;
         }
     }
 
@@ -1128,7 +1395,7 @@ async function addPneu() {
     const valor = parseFloat(document.getElementById('pneuValor').value) || 0;
     const km_atual = parseFloat(document.getElementById('pneuKMAtual').value);
     const km_proxima = parseFloat(document.getElementById('pneuKMProxima').value);
-    if (!veiculo_id || !data_pneu || !km_atual) { alert('Preencha ao menos veículo, data e KM da troca'); return; }
+    if (!veiculo_id || !data_pneu || !km_atual) { avisar('Preencha ao menos veículo, data e KM da troca'); return; }
     const payload = { veiculo_id, data: data_pneu, tipo, oficina, quantidade, valor_unitario, valor, km_atual, km_proxima };
     const { error } = isEdit
         ? await sb.from('pneus').update(payload).eq('id', editContext.id)
@@ -1148,12 +1415,12 @@ async function addOleo() {
     const km_atual = parseFloat(document.getElementById('oleoKMAtual').value);
     const valor = parseFloat(document.getElementById('oleoValor').value);
     const km_proxima = parseFloat(document.getElementById('oleoKMProxima').value);
-    if (!veiculo_id || !data_oleo || !tipo || !km_atual || !valor || !km_proxima) { alert('Preencha todos os campos obrigatórios'); return; }
+    if (!veiculo_id || !data_oleo || !tipo || !km_atual || !valor || !km_proxima) { avisar('Preencha todos os campos obrigatórios'); return; }
 
     if (fonte === 'galao' && !isEdit && litragem) {
         const nivel = nivelGalaoOleo();
         if (litragem > nivel.atual) {
-            if (!confirm(`O galão só tem ${nivel.atual.toFixed(1)} L disponíveis. Isso vai deixar o nível negativo. Continuar mesmo assim?`)) return;
+            if (!(await confirmar(`O galão só tem ${nivel.atual.toFixed(1)} L disponíveis. Isso vai deixar o nível negativo. Continuar mesmo assim?`, { titulo: 'Nível negativo' }))) return;
         }
     }
 
@@ -1173,7 +1440,7 @@ async function addPreventiva() {
     const km_atual = parseFloat(document.getElementById('preventivaKMAtual').value);
     const km_proxima = parseFloat(document.getElementById('preventivaKMProxima').value);
     const valor = parseFloat(document.getElementById('preventivaValor').value);
-    if (!veiculo_id || !data_prev || !descricao || !km_atual || !km_proxima || !valor) { alert('Preencha todos os campos'); return; }
+    if (!veiculo_id || !data_prev || !descricao || !km_atual || !km_proxima || !valor) { avisar('Preencha todos os campos'); return; }
     const payload = { veiculo_id, data: data_prev, descricao, km_atual, km_proxima, valor };
     const { error } = isEdit
         ? await sb.from('preventivas').update(payload).eq('id', editContext.id)
@@ -1191,7 +1458,7 @@ async function addCorretiva() {
     const km_atual = parseFloat(document.getElementById('corretivaKMAtual').value) || null;
     const km_proxima = parseFloat(document.getElementById('corretivaKMProxima').value) || null;
     const valor = parseFloat(document.getElementById('corretivaValor').value);
-    if (!veiculo_id || !data_cor || !descricao || !valor) { alert('Preencha veículo, data, descrição e valor'); return; }
+    if (!veiculo_id || !data_cor || !descricao || !valor) { avisar('Preencha veículo, data, descrição e valor'); return; }
     const payload = { veiculo_id, data: data_cor, descricao, oficina, km_atual, km_proxima, valor };
     const { error } = isEdit
         ? await sb.from('corretivas').update(payload).eq('id', editContext.id)
@@ -1206,7 +1473,7 @@ async function addCargaBomba() {
     const litros = parseFloat(document.getElementById('cargaBombaLitros').value);
     const valor_total = parseFloat(document.getElementById('cargaBombaValor').value);
     const fornecedor = document.getElementById('cargaBombaFornecedor').value;
-    if (!data_carga || !litros || !valor_total) { alert('Preencha data, litros e valor total'); return; }
+    if (!data_carga || !litros || !valor_total) { avisar('Preencha data, litros e valor total'); return; }
     const payload = { data: data_carga, litros, valor_total, fornecedor };
     const { error } = isEdit
         ? await sb.from('bomba_cargas').update(payload).eq('id', editContext.id)
@@ -1217,7 +1484,7 @@ async function addCargaBomba() {
 
 async function salvarAlertaBomba() {
     const valor = parseFloat(document.getElementById('alertaBombaValor').value);
-    if (isNaN(valor)) { alert('Informe um número válido'); return; }
+    if (isNaN(valor)) { avisar('Informe um número válido'); return; }
     const { error } = await sb.from('empresas').update({ bomba_alerta_minimo: valor }).eq('id', currentEmpresa.id);
     if (error) { alertErro(error); return; }
     currentEmpresa.bomba_alerta_minimo = valor;
@@ -1231,7 +1498,7 @@ async function addCargaGalaoOleo() {
     const litros = parseFloat(document.getElementById('cargaGalaoLitros').value);
     const valor_total = parseFloat(document.getElementById('cargaGalaoValor').value);
     const fornecedor = document.getElementById('cargaGalaoFornecedor').value;
-    if (!data_carga || !litros || !valor_total) { alert('Preencha data, litros e valor total'); return; }
+    if (!data_carga || !litros || !valor_total) { avisar('Preencha data, litros e valor total'); return; }
     const payload = { data: data_carga, tipo_oleo, litros, valor_total, fornecedor };
     const { error } = isEdit
         ? await sb.from('galao_oleo_cargas').update(payload).eq('id', editContext.id)
@@ -1242,7 +1509,7 @@ async function addCargaGalaoOleo() {
 
 async function salvarAlertaGalaoOleo() {
     const valor = parseFloat(document.getElementById('alertaGalaoValor').value);
-    if (isNaN(valor)) { alert('Informe um número válido'); return; }
+    if (isNaN(valor)) { avisar('Informe um número válido'); return; }
     const { error } = await sb.from('empresas').update({ galao_oleo_alerta_minimo: valor }).eq('id', currentEmpresa.id);
     if (error) { alertErro(error); return; }
     currentEmpresa.galao_oleo_alerta_minimo = valor;
@@ -1255,7 +1522,7 @@ async function addContaPagar() {
     const descricao = document.getElementById('contaPagarDescricao').value;
     const valor = parseFloat(document.getElementById('contaPagarValor').value);
     const data_vencimento = document.getElementById('contaPagarVencimento').value;
-    if (!fornecedor || !valor || !data_vencimento) { alert('Preencha fornecedor, valor e data de vencimento'); return; }
+    if (!fornecedor || !valor || !data_vencimento) { avisar('Preencha fornecedor, valor e data de vencimento'); return; }
     const payload = { fornecedor, descricao, valor, data_vencimento };
     const { error } = isEdit
         ? await sb.from('contas_pagar').update(payload).eq('id', editContext.id)
@@ -1267,20 +1534,20 @@ async function addContaPagar() {
 async function marcarContaPaga(id) {
     const conta = data.contas_pagar.find(c => c.id === id);
     if (!conta) return;
-    if (data.bancos.length === 0) { alert('Cadastre um banco primeiro pra poder marcar como pago.'); return; }
-    const nomesBancos = data.bancos.map((b,i) => `${i+1} - ${b.nome}`).join('\n');
-    const escolha = prompt(`Marcar "${conta.fornecedor}" (R$ ${Number(conta.valor).toFixed(2)}) como pago. De qual banco vai sair?\n${nomesBancos}`);
-    const idx = parseInt(escolha) - 1;
-    if (!data.bancos[idx]) return;
-    const banco = data.bancos[idx];
+    if (data.bancos.length === 0) { avisar('Cadastre um banco primeiro pra poder marcar como pago.'); return; }
+    const banco = await escolherBanco('Marcar como pago', `"${conta.fornecedor}" — R$ ${Number(conta.valor).toFixed(2)}\nDe qual banco vai sair o dinheiro?`);
+    if (!banco) return;
 
     const categoria = data.financeiro_categorias.find(c => c.nome === 'Outro')?.nome || data.financeiro_categorias[0]?.nome || 'Outro';
-    await sb.from('financeiro').insert({
-        empresa_id: currentEmpresa.id, banco_id: banco.id, data: new Date().toISOString().slice(0,10), tipo: 'saida',
+    const { error: errFin } = await sb.from('financeiro').insert({
+        empresa_id: currentEmpresa.id, banco_id: banco.id, data: hojeISO(), tipo: 'saida',
         motivo: categoria, descricao: `Conta paga - ${conta.fornecedor}${conta.descricao ? ' - ' + conta.descricao : ''}`, valor: Number(conta.valor)
     });
-    await sb.from('bancos').update({ saldo: Number(banco.saldo) - Number(conta.valor) }).eq('id', banco.id);
-    await sb.from('contas_pagar').update({ status: 'pago', data_pagamento: new Date().toISOString().slice(0,10), banco_id: banco.id }).eq('id', id);
+    if (errFin) { alertErro(errFin); return; }
+    // com o gatilho do banco (seguranca_banco.sql) o saldo é ajustado lá; senão ajusta aqui
+    if (!saldoAutomatico) await sb.from('bancos').update({ saldo: Number(banco.saldo) - Number(conta.valor) }).eq('id', banco.id);
+    const { error: errConta } = await sb.from('contas_pagar').update({ status: 'pago', data_pagamento: hojeISO(), banco_id: banco.id }).eq('id', id);
+    if (errConta) alertErro(errConta);
 
     await loadData(); updateDashboard();
 }
@@ -1291,7 +1558,7 @@ async function addContaReceber() {
     const descricao = document.getElementById('contaReceberDescricao').value;
     const valor = parseFloat(document.getElementById('contaReceberValor').value);
     const data_vencimento = document.getElementById('contaReceberVencimento').value;
-    if (!valor || !data_vencimento) { alert('Preencha valor e data de vencimento'); return; }
+    if (!valor || !data_vencimento) { avisar('Preencha valor e data de vencimento'); return; }
     const payload = { cliente_id, descricao, valor, data_vencimento };
     const { error } = isEdit
         ? await sb.from('contas_receber').update(payload).eq('id', editContext.id)
@@ -1303,21 +1570,20 @@ async function addContaReceber() {
 async function marcarContaRecebida(id) {
     const conta = data.contas_receber.find(c => c.id === id);
     if (!conta) return;
-    if (data.bancos.length === 0) { alert('Cadastre um banco primeiro pra poder marcar como recebido.'); return; }
-    const nomesBancos = data.bancos.map((b,i) => `${i+1} - ${b.nome}`).join('\n');
+    if (data.bancos.length === 0) { avisar('Cadastre um banco primeiro pra poder marcar como recebido.'); return; }
     const nomeCliente = data.clientes.find(c => c.id === conta.cliente_id)?.nome || 'Cliente';
-    const escolha = prompt(`Marcar recebimento de "${nomeCliente}" (R$ ${Number(conta.valor).toFixed(2)}) como recebido. Em qual banco entrou?\n${nomesBancos}`);
-    const idx = parseInt(escolha) - 1;
-    if (!data.bancos[idx]) return;
-    const banco = data.bancos[idx];
+    const banco = await escolherBanco('Marcar como recebido', `Recebimento de "${nomeCliente}" — R$ ${Number(conta.valor).toFixed(2)}\nEm qual banco o dinheiro entrou?`);
+    if (!banco) return;
 
     const categoria = data.financeiro_categorias.find(c => c.nome === 'Outro')?.nome || data.financeiro_categorias[0]?.nome || 'Outro';
-    await sb.from('financeiro').insert({
-        empresa_id: currentEmpresa.id, banco_id: banco.id, data: new Date().toISOString().slice(0,10), tipo: 'entrada',
+    const { error: errFin } = await sb.from('financeiro').insert({
+        empresa_id: currentEmpresa.id, banco_id: banco.id, data: hojeISO(), tipo: 'entrada',
         motivo: categoria, descricao: `Recebimento - ${nomeCliente}${conta.descricao ? ' - ' + conta.descricao : ''}`, valor: Number(conta.valor)
     });
-    await sb.from('bancos').update({ saldo: Number(banco.saldo) + Number(conta.valor) }).eq('id', banco.id);
-    await sb.from('contas_receber').update({ status: 'recebido', data_recebimento: new Date().toISOString().slice(0,10), banco_id: banco.id }).eq('id', id);
+    if (errFin) { alertErro(errFin); return; }
+    if (!saldoAutomatico) await sb.from('bancos').update({ saldo: Number(banco.saldo) + Number(conta.valor) }).eq('id', banco.id);
+    const { error: errConta } = await sb.from('contas_receber').update({ status: 'recebido', data_recebimento: hojeISO(), banco_id: banco.id }).eq('id', id);
+    if (errConta) alertErro(errConta);
 
     await loadData(); updateDashboard();
 }
@@ -1328,7 +1594,7 @@ async function addMulta() {
     const data_multa = document.getElementById('multaData').value;
     const descricao = document.getElementById('multaDescricao').value;
     const valor = parseFloat(document.getElementById('multaValor').value);
-    if (!veiculo_id || !data_multa || !descricao || !valor) { alert('Preencha todos os campos'); return; }
+    if (!veiculo_id || !data_multa || !descricao || !valor) { avisar('Preencha todos os campos'); return; }
     const payload = { veiculo_id, data: data_multa, descricao, valor };
     const { error } = isEdit
         ? await sb.from('multas').update(payload).eq('id', editContext.id)
@@ -1343,7 +1609,7 @@ async function addBanco() {
     const agencia = document.getElementById('bancoAgencia').value;
     const conta = document.getElementById('bancoConta').value;
     const saldo = parseFloat(document.getElementById('bancoSaldo').value);
-    if (!nome || !agencia || !conta || (isNaN(saldo))) { alert('Preencha todos os campos'); return; }
+    if (!nome || !agencia || !conta || (isNaN(saldo))) { avisar('Preencha todos os campos'); return; }
     const payload = { nome, agencia, conta, saldo };
     const { error } = isEdit
         ? await sb.from('bancos').update(payload).eq('id', editContext.id)
@@ -1363,37 +1629,38 @@ async function addFinanceiro() {
     const valor = parseFloat(document.getElementById('financeiroValor').value);
 
     if (motivo === '__nova__') {
-        const novaCategoria = prompt('Nome da nova categoria:');
+        const novaCategoria = await perguntar('Nome da nova categoria:', '', 'Nova categoria');
         if (!novaCategoria) return;
         const { error: errCat } = await sb.from('financeiro_categorias').insert({ empresa_id: currentEmpresa.id, nome: novaCategoria });
         if (errCat) { alertErro(errCat); return; }
         motivo = novaCategoria;
     }
-    if (!data_fin || !banco_id || !tipo || !motivo || !valor) { alert('Preencha todos os campos obrigatórios'); return; }
+    if (!data_fin || !banco_id || !tipo || !motivo || !valor) { avisar('Preencha todos os campos obrigatórios'); return; }
 
-    // se estiver editando, primeiro desfaz o efeito do lançamento antigo no saldo do banco antigo
-    if (isEdit) {
-        const antigo = data.financeiro.find(f => f.id === editContext.id);
-        if (antigo) {
-            const bancoAntigo = data.bancos.find(b => b.id === antigo.banco_id);
-            if (bancoAntigo) {
-                const saldoRevertido = antigo.tipo === 'entrada' ? bancoAntigo.saldo - Number(antigo.valor) : bancoAntigo.saldo + Number(antigo.valor);
-                await sb.from('bancos').update({ saldo: saldoRevertido }).eq('id', bancoAntigo.id);
-            }
-        }
-    }
+    if (valor < 0) return marcarCampoInvalido('financeiroValor', 'O valor deve ser positivo. Para uma saída, escolha o tipo "Saída".');
 
+    const antigo = isEdit ? data.financeiro.find(f => f.id === editContext.id) : null;
     const payload = { banco_id, data: data_fin, tipo, motivo, responsavel, descricao, valor };
     const { error } = isEdit
         ? await sb.from('financeiro').update(payload).eq('id', editContext.id)
         : await sb.from('financeiro').insert({ empresa_id: currentEmpresa.id, ...payload });
     if (error) { alertErro(error); return; }
 
-    // aplica o novo efeito no saldo do banco (atual, já refletindo a reversão se foi edição)
-    const { data: bancoAtualizado } = await sb.from('bancos').select('*').eq('id', banco_id).single();
-    if (bancoAtualizado) {
-        const novoSaldo = tipo === 'entrada' ? Number(bancoAtualizado.saldo) + valor : Number(bancoAtualizado.saldo) - valor;
-        await sb.from('bancos').update({ saldo: novoSaldo }).eq('id', banco_id);
+    // Com o gatilho do banco (seguranca_banco.sql) o saldo é ajustado lá, de forma atômica.
+    // Sem ele, o navegador faz o ajuste: desfaz o lançamento antigo e aplica o novo.
+    if (!saldoAutomatico) {
+        if (antigo) {
+            const { data: bAntigo } = await sb.from('bancos').select('*').eq('id', antigo.banco_id).single();
+            if (bAntigo) {
+                const revertido = antigo.tipo === 'entrada' ? Number(bAntigo.saldo) - Number(antigo.valor) : Number(bAntigo.saldo) + Number(antigo.valor);
+                await sb.from('bancos').update({ saldo: revertido }).eq('id', bAntigo.id);
+            }
+        }
+        const { data: bancoAtualizado } = await sb.from('bancos').select('*').eq('id', banco_id).single();
+        if (bancoAtualizado) {
+            const novoSaldo = tipo === 'entrada' ? Number(bancoAtualizado.saldo) + valor : Number(bancoAtualizado.saldo) - valor;
+            await sb.from('bancos').update({ saldo: novoSaldo }).eq('id', banco_id);
+        }
     }
     closeModal(); await loadData(); updateDashboard();
 }
@@ -1411,7 +1678,9 @@ async function addRota() {
     const hora_fim = document.getElementById('rotaHoraFim').value;
     const km_inicio = parseFloat(document.getElementById('rotaKMInicio').value);
     const km_fim = parseFloat(document.getElementById('rotaKMFim').value);
-    if (!veiculo_id || !motorista_id || !local_saida || !destino || !data_inicio || !data_fim || !hora_inicio || !hora_fim || !km_inicio || !km_fim) { alert('Preencha todos os campos'); return; }
+    if (!veiculo_id || !motorista_id || !local_saida || !destino || !data_inicio || !data_fim || !hora_inicio || !hora_fim || !km_inicio || !km_fim) { avisar('Preencha todos os campos'); return; }
+    if (km_fim <= km_inicio) return marcarCampoInvalido('rotaKMFim', 'O KM final precisa ser maior que o KM inicial.');
+    if (new Date(`${data_fim}T${hora_fim}`) < new Date(`${data_inicio}T${hora_inicio}`)) return marcarCampoInvalido('rotaDataFim', 'O fim da rota não pode ser antes do início.');
     const payload = { veiculo_id, motorista_id, rota_fixa_id, local_saida, destino, data_inicio, data_fim, hora_inicio, hora_fim, km_inicio, km_fim };
     const { error } = isEdit
         ? await sb.from('rotas').update(payload).eq('id', editContext.id)
@@ -1431,7 +1700,7 @@ async function addRotaFixa() {
     const valor_rota_fixa = parseFloat(document.getElementById('rotaFixaValor').value) || 0;
     const nota_fiscal_valor = parseFloat(document.getElementById('rotaFixaNotaFiscal').value) || 0;
     const imposto_percentual = parseFloat(document.getElementById('rotaFixaImposto').value) || 0;
-    if (!nome) { alert('Informe o nome da rota fixa'); return; }
+    if (!nome) { avisar('Informe o nome da rota fixa'); return; }
     const payload = { nome, local_saida, local_chegada, valor_motorista, valor_funcionarios, outros_valor, valor_rota_fixa, nota_fiscal_valor, imposto_percentual };
     const { error } = isEdit
         ? await sb.from('rotas_fixas').update(payload).eq('id', editContext.id)
@@ -1448,7 +1717,7 @@ async function addProduto() {
     const quantidade = parseFloat(document.getElementById('produtoQuantidade').value) || 0;
     const quantidade_minima = parseFloat(document.getElementById('produtoQuantidadeMinima').value) || 0;
     const valor_unitario = parseFloat(document.getElementById('produtoValorUnitario').value) || 0;
-    if (!nome) { alert('Informe o nome do produto'); return; }
+    if (!nome) { avisar('Informe o nome do produto'); return; }
     const payload = { nome, categoria, unidade, quantidade, quantidade_minima, valor_unitario };
     const { error } = isEdit
         ? await sb.from('produtos').update(payload).eq('id', editContext.id)
@@ -1463,10 +1732,10 @@ async function addMovimentacao() {
     const quantidade = parseFloat(document.getElementById('movQuantidade').value);
     const data_mov = document.getElementById('movData').value;
     const motivo = document.getElementById('movMotivo').value;
-    if (!produto_id || !quantidade || !data_mov) { alert('Preencha todos os campos'); return; }
+    if (!produto_id || !quantidade || !data_mov) { avisar('Preencha todos os campos'); return; }
     const produto = data.produtos.find(p => p.id === produto_id);
     if (tipo === 'saida' && produto && quantidade > produto.quantidade) {
-        if (!confirm(`Isso vai deixar o estoque negativo (${produto.quantidade} disponível). Continuar?`)) return;
+        if (!(await confirmar(`Isso vai deixar o estoque negativo (${produto.quantidade} disponível). Continuar?`, { titulo: 'Estoque negativo' }))) return;
     }
     const { error } = await sb.from('estoque_movimentacoes').insert({ empresa_id: currentEmpresa.id, produto_id, tipo, quantidade, data: data_mov, motivo });
     if (error) { alertErro(error); return; }
@@ -1484,7 +1753,7 @@ async function addAgenda() {
     const data_evento = document.getElementById('agendaData').value;
     const hora = document.getElementById('agendaHora').value || null;
     const categoria = document.getElementById('agendaCategoria').value;
-    if (!titulo || !data_evento) { alert('Preencha ao menos título e data'); return; }
+    if (!titulo || !data_evento) { avisar('Preencha ao menos título e data'); return; }
     const payload = { titulo, descricao, data: data_evento, hora, categoria };
     const { error } = isEdit
         ? await sb.from('agenda').update(payload).eq('id', editContext.id)
@@ -1525,13 +1794,13 @@ async function addViagem() {
     const outros_descricao = document.getElementById('viagemOutrosDescricao').value;
     const outros_valor = parseFloat(document.getElementById('viagemOutrosValor').value) || 0;
     const acerto_motorista_pago = document.getElementById('viagemAcerto').value === 'true';
-    if (!local_saida || !local_chegada || !data_viagem) { alert('Preencha ao menos saída, chegada e data'); return; }
+    if (!local_saida || !local_chegada || !data_viagem) { avisar('Preencha ao menos saída, chegada e data'); return; }
     const payload = {
         local_saida, local_chegada, motorista_id, cliente_id, veiculo_id, km, data: data_viagem, horario,
         valor_viagem, nota_fiscal_valor, imposto_percentual, depreciacao,
         valor_pedagio, valor_diaria, adiantamento, combustivel_litros, combustivel_valor_litro, combustivel_valor, outros_descricao, outros_valor,
         valor_motorista: valor_diaria, acerto_motorista_pago,
-        acerto_data: acerto_motorista_pago ? new Date().toISOString().slice(0,10) : null
+        acerto_data: acerto_motorista_pago ? hojeISO() : null
     };
     const { error } = isEdit
         ? await sb.from('turismo_viagens').update(payload).eq('id', editContext.id)
@@ -1542,17 +1811,15 @@ async function addViagem() {
     const jaEraPago = isEdit ? data.turismo_viagens.find(vg => vg.id === editContext.id)?.acerto_motorista_pago : false;
     const valorLiquido = valor_diaria - adiantamento;
     if (acerto_motorista_pago && !jaEraPago && valorLiquido > 0 && data.bancos.length > 0) {
-        const nomesBancos = data.bancos.map((b,i) => `${i+1} - ${b.nome}`).join('\n');
-        const escolha = prompt(`Lançar R$ ${valorLiquido.toFixed(2)} de comissão do motorista no Financeiro (diária R$ ${valor_diaria.toFixed(2)} - valor já pago ao motorista R$ ${adiantamento.toFixed(2)})?\nDigite o número do banco pra confirmar, ou cancele pra não lançar:\n${nomesBancos}`);
-        const idx = parseInt(escolha) - 1;
-        if (data.bancos[idx]) {
-            const banco = data.bancos[idx];
+        const banco = await escolherBanco('Lançar no Financeiro?', `Lançar R$ ${valorLiquido.toFixed(2)} de comissão do motorista no Financeiro\n(diária R$ ${valor_diaria.toFixed(2)} − valor já pago ao motorista R$ ${adiantamento.toFixed(2)}).\n\nEscolha o banco ou cancele para não lançar.`);
+        if (banco) {
             const categoriaComissao = data.financeiro_categorias.find(c => c.nome === 'Salário')?.nome || data.financeiro_categorias[0]?.nome || 'Outro';
-            await sb.from('financeiro').insert({
+            const { error: errFin } = await sb.from('financeiro').insert({
                 empresa_id: currentEmpresa.id, banco_id: banco.id, data: data_viagem, tipo: 'saida',
                 motivo: categoriaComissao, descricao: `Comissão/diária (líquido) - ${motoristaNome(motorista_id)} - viagem ${local_saida} → ${local_chegada}`, valor: valorLiquido
             });
-            await sb.from('bancos').update({ saldo: Number(banco.saldo) - valorLiquido }).eq('id', banco.id);
+            if (errFin) alertErro(errFin);
+            else if (!saldoAutomatico) await sb.from('bancos').update({ saldo: Number(banco.saldo) - valorLiquido }).eq('id', banco.id);
         }
     }
 
@@ -1603,6 +1870,7 @@ function loadMotoristas() {
         <td>${m.cnh_validade ? formatarData(m.cnh_validade) : '-'}</td>
         <td>${m.salario ? 'R$ ' + Number(m.salario).toFixed(2) : '-'}</td>
         <td>
+            ${btnAnexos('motoristas', m)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('motoristas','${m.id}','motorista')">Editar</button>
             <button class="btn-small" onclick="deleteItem('motoristas', '${m.id}')">Deletar</button>
         </td></tr>`;
@@ -1613,6 +1881,7 @@ function loadMotoristas() {
 function loadFuncionarios() {
     const linha = (f, cols) => `<tr><td>${f.nome}</td><td>${f.funcao||'-'}</td>${cols}
         <td>
+            ${btnAnexos('funcionarios', f)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('funcionarios','${f.id}','funcionario')">Editar</button>
             <button class="btn-small" onclick="deleteItem('funcionarios', '${f.id}')">Deletar</button>
         </td></tr>`;
@@ -1626,20 +1895,33 @@ function loadFuncionarios() {
 }
 
 function loadVeiculos() {
-    document.getElementById('veiculosTable').innerHTML = data.veiculos.map(vv => `
+    document.getElementById('veiculosTable').innerHTML = data.veiculos.map(vv => {
+        const combustivel = combustivelEstimadoTanque(vv.id);
+        let celulaCombustivel = '-';
+        if (combustivel) {
+            const cor = combustivel.percentual <= 20 ? '#e53935' : (combustivel.percentual <= 50 ? '#f9a825' : '#4caf50');
+            celulaCombustivel = `<strong style="color:${cor};">${combustivel.litros.toFixed(0)} L (${combustivel.percentual.toFixed(0)}%)</strong>${combustivel.semMediaConfiavel ? ' <span style="font-size:11px; color:#666;" title="Ainda não há km/l suficiente calculado pra esse veículo">⚠️</span>' : ''}`;
+        } else if (vv.tanque_litros) {
+            celulaCombustivel = '<span style="font-size:12px; color:#666;">Aguardando 1º abastecimento</span>';
+        }
+        return `
         <tr><td>${vv.placa}</td><td>${vv.marca}</td><td>${vv.modelo}</td><td>${vv.ano}</td><td>${vv.chassi||'-'}</td><td>${vv.renavam||'-'}</td>
         <td>${vv.numero_bancos || '-'}</td>
         <td>${Number(vv.km_atual||0).toLocaleString('pt-BR')} km</td>
         <td>${vv.valor ? 'R$ ' + Number(vv.valor).toFixed(2) : '-'}</td>
+        <td>${vv.tanque_litros ? Number(vv.tanque_litros).toFixed(0) + ' L' : '-'}</td>
+        <td>${celulaCombustivel}</td>
         <td>${vv.csv_validade ? formatarData(vv.csv_validade) : '-'}</td>
         <td>${vv.tacografo_validade ? formatarData(vv.tacografo_validade) : '-'}</td>
         <td>${vv.apolice_validade ? formatarData(vv.apolice_validade) : '-'}</td>
         <td>${vv.crlv_ano || '-'}</td>
         <td>
             <button class="btn-small" style="background:#764ba2;" onclick="verHistoricoVeiculo('${vv.id}')">Histórico</button>
+            ${btnAnexos('veiculos', vv)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('veiculos','${vv.id}','veiculo')">Editar</button>
             <button class="btn-small" onclick="deleteItem('veiculos', '${vv.id}')">Deletar</button>
-        </td></tr>`).join('');
+        </td></tr>`;
+    }).join('');
 }
 
 function loadClientes() {
@@ -1657,6 +1939,7 @@ function filtrarClientes() {
         <td>${c.cidade||''}${c.uf ? '/'+c.uf : ''}</td><td>${c.cep||'-'}</td>
         <td>${c.data_nascimento ? formatarData(c.data_nascimento) : ''}</td>
         <td>
+            ${btnAnexos('clientes', c)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('clientes','${c.id}','cliente')">Editar</button>
             <button class="btn-small" onclick="deleteItem('clientes', '${c.id}')">Deletar</button>
         </td></tr>`).join('') || '<tr><td colspan="8" style="color:#666; text-align:center; padding:20px;">Nenhum cliente encontrado com esse nome.</td></tr>';
@@ -1683,6 +1966,7 @@ function filtrarAbastecimentos() {
         <td>${a.km}</td><td>${Number(a.litros).toFixed(2)}</td><td>R$ ${Number(a.valor_litro).toFixed(2)}</td>
         <td>R$ ${Number(a.valor_total).toFixed(2)}</td><td>${Number(a.kml).toFixed(2)} km/l</td>
         <td>
+            ${btnAnexos('abastecimentos', a)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('abastecimentos','${a.id}','abastecimento')">Editar</button>
             <button class="btn-small" onclick="deleteItem('abastecimentos', '${a.id}')">Deletar</button>
         </td></tr>`).join('');
@@ -1705,6 +1989,7 @@ function filtrarPneus() {
         <td>R$ ${Number(p.valor_unitario||0).toFixed(2)}</td><td>R$ ${Number(p.valor||0).toFixed(2)}</td>
         <td>${p.km_atual} km</td><td>${veiculoKmAtual(p.veiculo_id).toLocaleString('pt-BR')} km</td><td>${p.km_proxima||'-'} km</td>
         <td>
+            ${btnAnexos('pneus', p)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('pneus','${p.id}','pneu')">Editar</button>
             <button class="btn-small" onclick="deleteItem('pneus', '${p.id}')">Deletar</button>
         </td></tr>`).join('');
@@ -1729,6 +2014,7 @@ function filtrarOleos() {
         <td>${o.km_atual} km</td><td>${veiculoKmAtual(o.veiculo_id).toLocaleString('pt-BR')} km</td><td>${o.km_proxima} km</td>
         <td>R$ ${Number(o.valor).toFixed(2)}</td>
         <td>
+            ${btnAnexos('oleos', o)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('oleos','${o.id}','oleo')">Editar</button>
             <button class="btn-small" onclick="deleteItem('oleos', '${o.id}')">Deletar</button>
         </td></tr>`;
@@ -1753,6 +2039,7 @@ function filtrarPreventivas() {
         <td>${p.descricao}</td><td>${p.km_atual} km</td><td>${p.km_proxima} km</td><td>${kmFaltando} km</td>
         <td>R$ ${Number(p.valor).toFixed(2)}</td>
         <td>
+            ${btnAnexos('preventivas', p)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('preventivas','${p.id}','preventiva')">Editar</button>
             <button class="btn-small" onclick="deleteItem('preventivas', '${p.id}')">Deletar</button>
         </td></tr>`;
@@ -1776,6 +2063,7 @@ function filtrarCorretivas() {
         <td>${veiculoKmAtual(c.veiculo_id).toLocaleString('pt-BR')} km</td><td>${c.km_proxima||'-'}</td>
         <td>R$ ${Number(c.valor).toFixed(2)}</td>
         <td>
+            ${btnAnexos('corretivas', c)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('corretivas','${c.id}','corretiva')">Editar</button>
             <button class="btn-small" onclick="deleteItem('corretivas', '${c.id}')">Deletar</button>
         </td></tr>`).join('');
@@ -1795,7 +2083,8 @@ function loadContasPagar() {
             <td>${c.data_pagamento ? formatarData(c.data_pagamento) : '-'}</td>
             <td>
                 ${c.status === 'pendente' ? `<button class="btn-small" style="background:#4caf50;" onclick="marcarContaPaga('${c.id}')">Marcar Pago</button>` : ''}
-                <button class="btn-small" style="background:#0066cc;" onclick="editarItem('contas_pagar','${c.id}','contaPagar')">Editar</button>
+                ${btnAnexos('contas_pagar', c)}
+            <button class="btn-small" style="background:#0066cc;" onclick="editarItem('contas_pagar','${c.id}','contaPagar')">Editar</button>
                 <button class="btn-small" onclick="deleteItem('contas_pagar', '${c.id}')">Deletar</button>
             </td></tr>`;
     }).join('');
@@ -1816,7 +2105,8 @@ function loadContasReceber() {
             <td>${c.data_recebimento ? formatarData(c.data_recebimento) : '-'}</td>
             <td>
                 ${c.status === 'pendente' ? `<button class="btn-small" style="background:#4caf50;" onclick="marcarContaRecebida('${c.id}')">Marcar Recebido</button>` : ''}
-                <button class="btn-small" style="background:#0066cc;" onclick="editarItem('contas_receber','${c.id}','contaReceber')">Editar</button>
+                ${btnAnexos('contas_receber', c)}
+            <button class="btn-small" style="background:#0066cc;" onclick="editarItem('contas_receber','${c.id}','contaReceber')">Editar</button>
                 <button class="btn-small" onclick="deleteItem('contas_receber', '${c.id}')">Deletar</button>
             </td></tr>`;
     }).join('');
@@ -1874,6 +2164,7 @@ function loadMultas() {
         <tr><td>${veiculoPlaca(m.veiculo_id)}</td><td>${formatarData(m.data)}</td>
         <td>${m.descricao}</td><td>R$ ${Number(m.valor).toFixed(2)}</td>
         <td>
+            ${btnAnexos('multas', m)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('multas','${m.id}','multa')">Editar</button>
             <button class="btn-small" onclick="deleteItem('multas', '${m.id}')">Deletar</button>
         </td></tr>`).join('');
@@ -1918,6 +2209,7 @@ function loadFinanceiro() {
         <td>${f.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td><td>${f.motivo}</td><td>${f.descricao||''}</td>
         <td>R$ ${Number(f.valor).toFixed(2)}</td>
         <td>
+            ${btnAnexos('financeiro', f)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('financeiro','${f.id}','financeiro')">Editar</button>
             <button class="btn-small" onclick="deleteItem('financeiro', '${f.id}')">Deletar</button>
         </td></tr>`).join('');
@@ -2035,6 +2327,170 @@ function loadAgenda() {
     }).join('') || '<p style="color:#666;">Nenhum compromisso cadastrado ainda.</p>';
 }
 
+// ==== CONTROLE DE ROTAS (escala de veículos por data e horário, com bloqueio de conflitos) ====
+let escalaIndisponivel = false; // true quando a tabela escala_rotas ainda não existe no banco (controle_rotas.sql)
+const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+function escHtml(t) { return String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function isoLocal(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function hhmm(t) { return String(t || '').slice(0, 5); }
+
+// início e fim reais da programação (se a hora final for menor/igual à inicial, termina no dia seguinte)
+function intervaloEscala(dataISO, horaIni, horaFim) {
+    const ini = new Date(`${dataISO}T${hhmm(horaIni)}:00`);
+    const fim = new Date(`${dataISO}T${hhmm(horaFim)}:00`);
+    if (fim <= ini) fim.setDate(fim.getDate() + 1);
+    return { ini, fim };
+}
+function sobrepoe(a, b) { return a.ini < b.fim && b.ini < a.fim; } // encostar (fim = início) NÃO é conflito
+
+function descricaoEscala(e) {
+    const { ini, fim } = intervaloEscala(e.data, e.hora_inicio, e.hora_fim);
+    const dia = parseDataLocal(e.data).toLocaleDateString('pt-BR');
+    return `"${e.nome}" em ${dia} das ${hhmm(e.hora_inicio)} às ${hhmm(e.hora_fim)}${fim.getDate() !== ini.getDate() ? ' (termina no dia seguinte)' : ''}`;
+}
+
+// devolve a lista de conflitos de uma programação nova com o que já está cadastrado
+function conflitosEscala(nova, ignorarId = null) {
+    const alvo = intervaloEscala(nova.data, nova.hora_inicio, nova.hora_fim);
+    const achados = [];
+    data.escala_rotas.forEach(e => {
+        if (e.id === ignorarId) return;
+        if (!sobrepoe(alvo, intervaloEscala(e.data, e.hora_inicio, e.hora_fim))) return;
+        if (e.veiculo_id === nova.veiculo_id) achados.push(`🚐 O veículo ${veiculoPlaca(e.veiculo_id)} já está em ${descricaoEscala(e)}.`);
+        else if (nova.motorista_id && e.motorista_id === nova.motorista_id) achados.push(`👤 O motorista ${motoristaNome(e.motorista_id)} já está em ${descricaoEscala(e)} (veículo ${veiculoPlaca(e.veiculo_id)}).`);
+    });
+    return achados;
+}
+
+function loadControleRotas() {
+    const box = document.getElementById('controleContent');
+    if (!box) return;
+    if (escalaIndisponivel) {
+        box.innerHTML = '<p style="color:#c62828;">O Controle de Rotas ainda não foi ativado no banco de dados. Rode o arquivo <b>controle_rotas.sql</b> no SQL Editor do Supabase e recarregue a página.</p>';
+        return;
+    }
+    const deEl = document.getElementById('controleDe'), ateEl = document.getElementById('controleAte'), veicEl = document.getElementById('controleVeiculo');
+    if (!deEl.value) deEl.value = hojeISO();
+    if (!ateEl.value) { const d = new Date(); d.setDate(d.getDate() + 6); ateEl.value = isoLocal(d); }
+    const atualVeic = veicEl.value;
+    veicEl.innerHTML = '<option value="">Todos os veículos</option>' + [...data.veiculos].sort((a, b) => (a.placa || '').localeCompare(b.placa || '', 'pt-BR')).map(x => `<option value="${x.id}">${escHtml(x.placa)}</option>`).join('');
+    veicEl.value = atualVeic;
+
+    const lista = data.escala_rotas
+        .filter(e => e.data >= deEl.value && e.data <= ateEl.value && (!veicEl.value || e.veiculo_id === veicEl.value))
+        .sort((a, b) => (a.data + hhmm(a.hora_inicio)).localeCompare(b.data + hhmm(b.hora_inicio)));
+    if (!lista.length) { box.innerHTML = '<p style="color:#666;">Nenhuma rota programada nesse período.</p>'; return; }
+
+    const dias = {};
+    lista.forEach(e => (dias[e.data] = dias[e.data] || []).push(e));
+    box.innerHTML = Object.keys(dias).sort().map(dia => {
+        const d = parseDataLocal(dia);
+        const itens = dias[dia].map(e => {
+            const rf = data.rotas_fixas.find(r => r.id === e.rota_fixa_id);
+            return `<div class="birthday-item">
+                <div class="birthday-info"><h4>${hhmm(e.hora_inicio)} → ${hhmm(e.hora_fim)} &nbsp;•&nbsp; ${escHtml(e.nome)} ${rf ? '<span style="font-size:11px;color:#666;">(rota fixa)</span>' : ''}</h4>
+                <p>🚐 ${escHtml(veiculoPlaca(e.veiculo_id))} ${e.motorista_id ? '• 👤 ' + escHtml(motoristaNome(e.motorista_id)) : ''} ${e.observacao ? '• ' + escHtml(e.observacao) : ''}</p></div>
+                <div>
+                    <button class="btn-small" style="background:#0066cc;" onclick="editarItem('escala_rotas','${e.id}','escala')">Editar</button>
+                    <button class="btn-small" onclick="deleteItem('escala_rotas','${e.id}')">Deletar</button>
+                </div></div>`;
+        }).join('');
+        return `<h3 style="margin:18px 0 8px;">${DIAS_SEMANA[d.getDay()]}, ${d.toLocaleDateString('pt-BR')}</h3>${itens}`;
+    }).join('');
+}
+
+function escalaPreencherNome() {
+    const rf = data.rotas_fixas.find(r => r.id === document.getElementById('escalaRotaFixa').value);
+    if (rf) document.getElementById('escalaNome').value = rf.nome;
+}
+
+function htmlModalEscala(item) {
+    const veic = [...data.veiculos].sort((a, b) => (a.placa || '').localeCompare(b.placa || '', 'pt-BR')).map(x => `<option value="${x.id}">${escHtml(x.placa)} - ${escHtml(x.modelo || '')}</option>`).join('');
+    const mot = '<option value="">(sem motorista definido)</option>' + [...data.motoristas].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' })).map(m => `<option value="${m.id}">${escHtml(m.nome)}</option>`).join('');
+    const fixas = '<option value="">(rota avulsa)</option>' + [...data.rotas_fixas].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' })).map(r => `<option value="${r.id}">${escHtml(r.nome)}</option>`).join('');
+    const repetir = item ? '' : `
+        <div class="form-group"><label>Repetir toda semana nos dias (opcional)</label>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">${DIAS_SEMANA.map((n, i) => `<label style="font-weight:normal;"><input type="checkbox" class="escalaDia" value="${i}"> ${n}</label>`).join('')}</div></div>
+        <div class="form-group"><label>Repetir até (se marcou dias)</label><input type="date" id="escalaAte"></div>`;
+    return `
+        <div class="form-group"><label>Rota fixa (opcional)</label><select id="escalaRotaFixa" onchange="escalaPreencherNome()">${fixas}</select></div>
+        <div class="form-group"><label>Nome da rota</label><input type="text" id="escalaNome" value="${escHtml(v(item, 'nome'))}"></div>
+        <div class="form-row">
+            <div class="form-group"><label>Veículo</label><select id="escalaVeiculo">${veic}</select></div>
+            <div class="form-group"><label>Motorista</label><select id="escalaMotorista">${mot}</select></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Data${item ? '' : ' (primeiro dia)'}</label><input type="date" id="escalaData" value="${v(item, 'data', hojeISO())}"></div>
+            <div class="form-group"><label>Saída</label><input type="time" id="escalaHoraIni" value="${hhmm(v(item, 'hora_inicio'))}"></div>
+            <div class="form-group"><label>Chegada prevista</label><input type="time" id="escalaHoraFim" value="${hhmm(v(item, 'hora_fim'))}"></div>
+        </div>
+        ${repetir}
+        <div class="form-group"><label>Observação</label><input type="text" id="escalaObs" value="${escHtml(v(item, 'observacao'))}"></div>
+        <button onclick="addEscala()">${item ? 'Salvar Alterações' : 'Programar'}</button>`;
+}
+
+async function addEscala() {
+    if (escalaIndisponivel) { avisar('Rode o controle_rotas.sql no Supabase antes de usar o Controle de Rotas.'); return; }
+    const isEdit = editContext && editContext.type === 'escala';
+    const rota_fixa_id = document.getElementById('escalaRotaFixa').value || null;
+    const nome = document.getElementById('escalaNome').value.trim();
+    const veiculo_id = document.getElementById('escalaVeiculo').value;
+    const motorista_id = document.getElementById('escalaMotorista').value || null;
+    const data_ini = document.getElementById('escalaData').value;
+    const hora_inicio = document.getElementById('escalaHoraIni').value;
+    const hora_fim = document.getElementById('escalaHoraFim').value;
+    const observacao = document.getElementById('escalaObs').value.trim() || null;
+    if (!nome) return marcarCampoInvalido('escalaNome', 'Informe o nome da rota.');
+    if (!veiculo_id) { avisar('Escolha o veículo.'); return; }
+    if (!data_ini || !hora_inicio || !hora_fim) { avisar('Preencha data, saída e chegada prevista.'); return; }
+    if (hora_inicio === hora_fim) return marcarCampoInvalido('escalaHoraFim', 'A chegada não pode ser igual à saída.');
+
+    // datas: uma só, ou várias se escolheu repetir por dia da semana
+    let datas = [data_ini];
+    const diasSel = [...document.querySelectorAll('.escalaDia:checked')].map(c => parseInt(c.value));
+    if (!isEdit && diasSel.length) {
+        const ate = document.getElementById('escalaAte').value;
+        if (!ate || ate < data_ini) return marcarCampoInvalido('escalaAte', 'Informe a data final da repetição (depois da data inicial).');
+        datas = [];
+        for (let d = parseDataLocal(data_ini), limite = parseDataLocal(ate); d <= limite; d.setDate(d.getDate() + 1)) {
+            if (diasSel.includes(d.getDay())) datas.push(isoLocal(d));
+        }
+        if (!datas.length) { avisar('Nenhuma data cai nos dias da semana marcados nesse período.'); return; }
+        if (datas.length > 200) { avisar('Muitas datas de uma vez (máx. 200). Reduza o período.'); return; }
+    }
+
+    const novas = datas.map(d => ({ nome, rota_fixa_id, veiculo_id, motorista_id, data: d, hora_inicio, hora_fim, observacao }));
+
+    // 1) conflitos com o que já existe: BLOQUEIA tudo
+    const bloqueios = [];
+    novas.forEach(n => conflitosEscala(n, isEdit ? editContext.id : null).forEach(msg => bloqueios.push(`${parseDataLocal(n.data).toLocaleDateString('pt-BR')}: ${msg}`)));
+    if (bloqueios.length) {
+        const mostrar = bloqueios.slice(0, 8).join('\n') + (bloqueios.length > 8 ? `\n... e mais ${bloqueios.length - 8} conflito(s).` : '');
+        await _dialogo({ titulo: '⛔ Conflito de escala — não foi salvo', texto: mostrar + '\n\nAjuste o horário, o veículo ou o motorista e tente de novo.', okLabel: 'Entendi', semCancelar: true, perigo: true });
+        return;
+    }
+
+    // 2) viagem de turismo no mesmo dia com o mesmo veículo: só avisa (a viagem não tem hora de chegada)
+    const avisosTurismo = [];
+    novas.forEach(n => data.turismo_viagens.filter(t => t.veiculo_id === n.veiculo_id && t.data === n.data)
+        .forEach(t => avisosTurismo.push(`${parseDataLocal(n.data).toLocaleDateString('pt-BR')}: viagem de turismo ${t.local_saida} → ${t.local_chegada}${t.horario ? ' às ' + hhmm(t.horario) : ''}`)));
+    if (avisosTurismo.length) {
+        const ok = await confirmar(`O veículo ${veiculoPlaca(veiculo_id)} também tem turismo marcado:\n${avisosTurismo.slice(0, 6).join('\n')}\n\nSalvar mesmo assim?`, { titulo: 'Atenção: turismo no mesmo dia', okLabel: 'Salvar mesmo assim' });
+        if (!ok) return;
+    }
+
+    const { error } = isEdit
+        ? await sb.from('escala_rotas').update(novas[0]).eq('id', editContext.id)
+        : await sb.from('escala_rotas').insert(novas.map(n => ({ empresa_id: currentEmpresa.id, ...n })));
+    if (error) {
+        if (error.code === '23P01') { await _dialogo({ titulo: '⛔ Conflito de escala', texto: 'O banco de dados recusou: esse veículo (ou motorista) já está em outra rota nesse horário. Atualize a página e confira a escala.', okLabel: 'Entendi', semCancelar: true, perigo: true }); await loadData(); loadControleRotas(); return; }
+        alertErro(error); return;
+    }
+    closeModal(); await loadData(); loadControleRotas();
+    toast(isEdit ? 'Rota atualizada.' : `${novas.length} rota(s) programada(s).`, 'ok');
+}
+
 function preencherFiltroClientesTurismo() {
     const sel = document.getElementById('filtroTurismoCliente');
     if (!sel) return;
@@ -2069,6 +2525,7 @@ function filtrarTurismo() {
         <td>R$ ${valorLiquido.toFixed(2)}</td>
         <td><span class="badge ${vg.acerto_motorista_pago ? 'badge-pago' : 'badge-pendente'}">${vg.acerto_motorista_pago ? 'Pago' : 'Pendente'}</span></td>
         <td>
+            ${btnAnexos('turismo_viagens', vg)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('turismo_viagens','${vg.id}','viagem')">Editar</button>
             <button class="btn-small" onclick="deleteItem('turismo_viagens', '${vg.id}')">Deletar</button>
         </td></tr>`;
@@ -2313,8 +2770,12 @@ function verHistoricoVeiculo(veiculoId) {
     const gastoTotal = eventos.reduce((s,e) => s + (e.valor || 0), 0);
 
     document.getElementById('modalTitle').textContent = `📜 Histórico - ${vv.placa} (${vv.marca} ${vv.modelo})`;
+    const combustivel = combustivelEstimadoTanque(veiculoId);
+    const linhaCombustivel = combustivel
+        ? ` • Combustível no tanque (estimado): <strong>${combustivel.litros.toFixed(0)} L de ${combustivel.tanque.toFixed(0)} L (${combustivel.percentual.toFixed(0)}%)</strong>${combustivel.semMediaConfiavel ? ' <span style="font-size:12px; color:#666;">(ainda sem km/l suficiente pra ser confiável)</span>' : ''}`
+        : (vv.tanque_litros ? ' • Combustível: aguardando o 1º abastecimento cadastrado' : '');
     document.getElementById('modalBody').innerHTML = `
-        <p style="margin-bottom:10px; color:#666;">KM atual: <strong>${Number(vv.km_atual||0).toLocaleString('pt-BR')} km</strong> • Gasto total registrado: <strong>R$ ${gastoTotal.toFixed(2)}</strong> • ${eventos.length} eventos</p>
+        <p style="margin-bottom:10px; color:#666;">KM atual: <strong>${Number(vv.km_atual||0).toLocaleString('pt-BR')} km</strong> • Gasto total registrado: <strong>R$ ${gastoTotal.toFixed(2)}</strong> • ${eventos.length} eventos${linhaCombustivel}</p>
         <div style="max-height:400px; overflow-y:auto;">
             ${eventos.map(e => `
                 <div class="gasto-item">
@@ -2351,12 +2812,27 @@ function carregarAlertasDocumentos() {
             </div>`).join('');
 }
 
+// Considera só o registro mais recente de cada tipo por veículo (uma troca de óleo antiga não pode
+// continuar aparecendo como "atrasada" depois que o óleo já foi trocado de novo).
+function proximasManutencoesAtuais() {
+    const grupos = {};
+    const considerar = (tipo, lista) => lista.forEach(r => {
+        if (!r.km_proxima) return;
+        const chave = tipo + '|' + r.veiculo_id;
+        const atual = grupos[chave];
+        const tr = parseDataLocal(r.data)?.getTime() || 0;
+        const ta = atual ? (parseDataLocal(atual.data)?.getTime() || 0) : -1;
+        if (!atual || tr > ta || (tr === ta && Number(r.km_atual || 0) > Number(atual.km_atual || 0))) grupos[chave] = r;
+    });
+    considerar('Pneu', data.pneus); considerar('Óleo', data.oleos); considerar('Preventiva', data.preventivas);
+    return Object.entries(grupos).map(([chave, r]) => ({
+        tipo: chave.split('|')[0], veiculoId: r.veiculo_id, veiculo: veiculoPlaca(r.veiculo_id),
+        kmFaltando: Number(r.km_proxima) - veiculoKmAtual(r.veiculo_id)
+    })).sort((a, b) => a.kmFaltando - b.kmFaltando);
+}
+
 function carregarProximasManutencoes() {
-    const itens = [];
-    data.pneus.forEach(p => { if (p.km_proxima) itens.push({ tipo: 'Pneu', veiculo: veiculoPlaca(p.veiculo_id), kmFaltando: p.km_proxima - veiculoKmAtual(p.veiculo_id) }); });
-    data.oleos.forEach(o => { if (o.km_proxima) itens.push({ tipo: 'Óleo', veiculo: veiculoPlaca(o.veiculo_id), kmFaltando: o.km_proxima - veiculoKmAtual(o.veiculo_id) }); });
-    data.preventivas.forEach(p => { if (p.km_proxima) itens.push({ tipo: 'Preventiva', veiculo: veiculoPlaca(p.veiculo_id), kmFaltando: p.km_proxima - veiculoKmAtual(p.veiculo_id) }); });
-    itens.sort((a,b) => a.kmFaltando - b.kmFaltando);
+    const itens = proximasManutencoesAtuais();
 
     document.getElementById('proximasManutencoes').innerHTML = itens.length === 0
         ? '<p style="color:#666;">Nenhuma manutenção com KM de troca registrado ainda.</p>'
@@ -2389,21 +2865,10 @@ function loadAniversarios() {
 }
 
 async function deleteItem(type, id) {
-    if (!confirm('Tem certeza que deseja deletar?')) return;
+    if (!(await confirmar('Tem certeza que deseja deletar? Essa ação não pode ser desfeita.', { titulo: 'Excluir registro', okLabel: 'Excluir', perigo: true }))) return;
 
-    // Se for um lançamento financeiro, reverte o efeito dele no saldo do banco antes de apagar
-    if (type === 'financeiro') {
-        const lancamento = data.financeiro.find(f => f.id === id);
-        if (lancamento && lancamento.banco_id) {
-            const banco = data.bancos.find(b => b.id === lancamento.banco_id);
-            if (banco) {
-                const saldoRevertido = lancamento.tipo === 'entrada'
-                    ? Number(banco.saldo) - Number(lancamento.valor)
-                    : Number(banco.saldo) + Number(lancamento.valor);
-                await sb.from('bancos').update({ saldo: saldoRevertido }).eq('id', banco.id);
-            }
-        }
-    }
+    // Guarda o lançamento financeiro: sem o gatilho do banco, o saldo é revertido aqui (só depois de apagar com sucesso)
+    const lancamentoApagado = type === 'financeiro' ? (data.financeiro.find(f => f.id === id) || null) : null;
 
     // Guarda o veículo afetado (se for um tipo que impacta o KM) pra recalcular depois de apagar
     const tiposComKm = ['rotas', 'abastecimentos', 'pneus', 'oleos', 'preventivas', 'corretivas'];
@@ -2415,6 +2880,13 @@ async function deleteItem(type, id) {
 
     const { error } = await sb.from(type).delete().eq('id', id);
     if (error) { alertErro(error); return; }
+    if (lancamentoApagado && lancamentoApagado.banco_id && !saldoAutomatico) {
+        const { data: banco } = await sb.from('bancos').select('*').eq('id', lancamentoApagado.banco_id).single();
+        if (banco) {
+            const revertido = lancamentoApagado.tipo === 'entrada' ? Number(banco.saldo) - Number(lancamentoApagado.valor) : Number(banco.saldo) + Number(lancamentoApagado.valor);
+            await sb.from('bancos').update({ saldo: revertido }).eq('id', banco.id);
+        }
+    }
     await loadData();
     if (veiculoAfetado) {
         await recalcularKmVeiculo(veiculoAfetado);
@@ -2423,6 +2895,7 @@ async function deleteItem(type, id) {
     }
     updateDashboard();
     if (type === 'agenda') loadAgenda();
+    if (type === 'escala_rotas') loadControleRotas();
     if (type === 'turismo_viagens') filtrarTurismo();
     if (type === 'bomba_cargas') loadBomba();
 }
@@ -2441,6 +2914,7 @@ function updateDashboard() {
     carregarTopGastos();
     carregarAlertasDocumentos();
     carregarProximasManutencoes();
+    if (typeof renderizarAlertas === 'function') renderizarAlertas();
 }
 
 function calcularTotalGasto() {
@@ -2513,6 +2987,7 @@ function filtrarFinanceiro() {
         <td>${f.tipo === 'entrada' ? '✓ Entrada' : '✗ Saída'}</td><td>${f.motivo}</td><td>${f.responsavel||'-'}</td><td>${f.descricao||''}</td>
         <td>R$ ${Number(f.valor).toFixed(2)}</td>
         <td>
+            ${btnAnexos('financeiro', f)}
             <button class="btn-small" style="background:#0066cc;" onclick="editarItem('financeiro','${f.id}','financeiro')">Editar</button>
             <button class="btn-small" onclick="deleteItem('financeiro', '${f.id}')">Deletar</button>
         </td></tr>`).join('');
@@ -2700,17 +3175,35 @@ function calcularValorTotal() {
 }
 
 // ==== CARREGAR DADOS ====
+// O Supabase devolve no máximo 1000 linhas por consulta: busca em páginas pra nunca cortar dados
+async function buscarTodos(tabela, empresaId) {
+    const PAGINA = 1000;
+    let todos = [];
+    for (let inicio = 0; ; inicio += PAGINA) {
+        const { data: lote, error } = await sb.from(tabela).select('*').eq('empresa_id', empresaId)
+            .order('created_at', { ascending: false }).order('id', { ascending: true }).range(inicio, inicio + PAGINA - 1);
+        if (error) return { error };
+        todos = todos.concat(lote);
+        if (lote.length < PAGINA) break;
+    }
+    return { data: todos };
+}
+
 async function loadData() {
     const empresaId = currentEmpresa.id;
     const tabelas = ['motoristas','funcionarios','veiculos','clientes','abastecimentos','pneus','oleos',
                       'preventivas','corretivas','multas','bancos','financeiro','rotas','produtos','estoque_movimentacoes',
-                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas','contas_pagar','contas_receber','galao_oleo_cargas'];
+                      'agenda','turismo_viagens','rotas_fixas','financeiro_categorias','bomba_cargas','contas_pagar','contas_receber','galao_oleo_cargas','escala_rotas'];
 
-    const resultados = await Promise.all(tabelas.map(t => sb.from(t).select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false })));
+    const resultados = await Promise.all(tabelas.map(t => buscarTodos(t, empresaId)));
+    const falhas = [];
     resultados.forEach((res, i) => {
-        if (res.error) { console.error(`Erro ao carregar ${tabelas[i]}:`, res.error); data[tabelas[i]] = []; }
+        if (res.error) { console.error(`Erro ao carregar ${tabelas[i]}:`, res.error); data[tabelas[i]] = []; falhas.push(tabelas[i]); }
         else { data[tabelas[i]] = res.data; }
     });
+    escalaIndisponivel = falhas.includes('escala_rotas'); // tabela opcional: só existe depois do controle_rotas.sql
+    if (escalaIndisponivel) falhas.splice(falhas.indexOf('escala_rotas'), 1);
+    if (falhas.length) toast(`Não consegui carregar: ${falhas.join(', ')}. Atualize a página; se continuar, fale com o administrador.`, 'erro', 9000);
     data.financeiro_categorias.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 
     loadMotoristas(); loadFuncionarios(); loadVeiculos(); loadClientes();

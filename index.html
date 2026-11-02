@@ -50,6 +50,7 @@
             <div class="sidebar">
                 <div class="menu-item active" onclick="showPage('dashboard')">📊 Dashboard</div>
                 <div class="menu-item" onclick="showPage('agenda')">📅 Agenda</div>
+                <div class="menu-item" onclick="showPage('controle')">🕒 Controle de Rotas</div>
                 <div class="menu-item" onclick="showPage('rotas')">🗺️ Rotas</div>
                 <div class="menu-item" onclick="showPage('turismo')">🚌 Turismo</div>
                 <div class="menu-item" onclick="showPage('clientes')">👥 Clientes</div>
@@ -126,7 +127,7 @@
                         <button class="btn-excel" onclick="exportarExcel('veiculos')">📥 Exportar Excel</button>
                     </div>
                     <table>
-                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>Bancos</th><th>KM Atual</th><th>Valor</th><th>Val. CSV</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
+                        <thead><tr><th>Placa</th><th>Marca</th><th>Modelo</th><th>Ano</th><th>Chassi</th><th>Renavam</th><th>Bancos</th><th>KM Atual</th><th>Valor</th><th>Tanque</th><th>Combustível Estimado</th><th>Val. CSV</th><th>Val. Tacógrafo</th><th>Val. Apólice</th><th>Ano CRLV</th><th>Ações</th></tr></thead>
                         <tbody id="veiculosTable"></tbody>
                     </table>
                 </div>
@@ -374,6 +375,21 @@
                         <button class="btn-excel" onclick="exportarExcel('agenda')">📥 Exportar Excel</button>
                     </div>
                     <div id="agendaContent"></div>
+                </div>
+
+                <!-- CONTROLE DE ROTAS -->
+                <div id="controle" class="page">
+                    <h2>🕒 Controle de Rotas</h2>
+                    <p style="color:#666;margin-bottom:10px;">Programe quais veículos fazem cada rota, em que dia e horário. O sistema bloqueia o mesmo veículo (ou motorista) em duas rotas ao mesmo tempo.</p>
+                    <div class="btn-row">
+                        <button onclick="openAddModal('escala')">+ Programar Rota</button>
+                    </div>
+                    <div class="form-row" style="margin:12px 0;">
+                        <div class="form-group"><label>De</label><input type="date" id="controleDe" onchange="loadControleRotas()"></div>
+                        <div class="form-group"><label>Até</label><input type="date" id="controleAte" onchange="loadControleRotas()"></div>
+                        <div class="form-group"><label>Veículo</label><select id="controleVeiculo" onchange="loadControleRotas()"></select></div>
+                    </div>
+                    <div id="controleContent"></div>
                 </div>
 
                 <!-- BANCOS -->
